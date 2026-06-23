@@ -18,6 +18,9 @@ The prototype is intentionally simple: Node server, browser UI, xAI STT/LLM inte
 ## Provider Behavior
 
 - xAI is the primary provider when `X_AI_API_KEY` or `XAI_API_KEY` is set.
+- Default model routing is cost-aware:
+  - `X_AI_MODEL` / `XAI_MODEL`, default `grok-4.3`, is used for web-search lookups and fact checks.
+  - `X_AI_LOW_COST_MODEL` / `XAI_LOW_COST_MODEL`, default `grok-build-0.1`, is used for non-search synthesis such as Q&A, agenda, and slide generation.
 - API keys must stay server-side. Never expose provider keys in browser code.
 - Realtime STT is proxied through `WS /stt`.
 - Uploaded recordings are sent to xAI batch STT through `POST /api/transcribe-upload`.

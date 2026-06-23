@@ -33,10 +33,13 @@ If xAI is not configured and your browser does not support `SpeechRecognition`, 
 ```bash
 echo 'X_AI_API_KEY=...' > .env
 export X_AI_MODEL=grok-4.3
+export X_AI_LOW_COST_MODEL=grok-build-0.1
 npm run dev
 ```
 
 The app intentionally keeps xAI access on the server. The browser never receives the API key.
+
+By default, the app uses `grok-4.3` for live web-search lookups and fact checks, and `grok-build-0.1` for lower-cost non-search synthesis such as Q&A, agenda, and slide generation. Override either model with `X_AI_MODEL` or `X_AI_LOW_COST_MODEL`.
 
 ## Production Direction
 

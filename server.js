@@ -17,6 +17,7 @@ const openaiApiKey = process.env.OPENAI_API_KEY || '';
 const llmProvider = xaiApiKey ? 'xai' : (openaiApiKey ? 'openai' : 'local');
 const llmApiKey = xaiApiKey || openaiApiKey;
 const llmModel = process.env.X_AI_MODEL || process.env.XAI_MODEL || process.env.OPENAI_MODEL || (xaiApiKey ? 'grok-4.3' : 'gpt-4.1-mini');
+const lowCostLlmModel = process.env.X_AI_LOW_COST_MODEL || process.env.XAI_LOW_COST_MODEL || (xaiApiKey ? 'grok-build-0.1' : llmModel);
 const llmResponsesUrl = xaiApiKey ? 'https://api.x.ai/v1/responses' : 'https://api.openai.com/v1/responses';
 const db = initDatabase(path.join(__dirname, 'data', 'meeting.sqlite'));
 
@@ -28,6 +29,7 @@ const server = http.createServer(async (req, res) => {
         sttProvider: xaiApiKey ? 'xai' : 'browser',
         llmProvider,
         llmModel,
+        lowCostLlmModel,
         uploadTranscriptionEnabled: Boolean(xaiApiKey),
         dspDefaults: {
           echoCancellation: true,
@@ -64,6 +66,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(port, host, () => {
   console.log(`Live Meeting Transcriber listening at http://${host}:${port}`);
   console.log(xaiApiKey ? `xAI STT and analysis enabled with ${llmModel}` : 'xAI disabled; browser STT/local fallbacks available.');
+  if (xaiApiKey) console.log(`Low-cost xAI model for non-search synthesis: ${lowCostLlmModel}`);
   if (!xaiApiKey && openaiApiKey) console.log(`OpenAI analysis enabled with ${llmModel}`);
 });
 
@@ -245,7 +248,7 @@ async function answerQuestion(body) {
       '',
       `Question: ${question}`
     ].join('\n');
-    const parsed = await tryLlmJson(prompt);
+    const parsed = await tryLlmJson(prompt, { lowCost: true });
     if (parsed?.answer) return { answer: String(parsed.answer), citations: Array.isArray(parsed.citations) ? parsed.citations : [] };
   }
 
@@ -327,7 +330,7 @@ async function buildAgenda(body) {
       '',
       transcriptText(segments)
     ].join('\n');
-    const parsed = await tryLlmJson(prompt);
+    const parsed = await tryLlmJson(prompt, { lowCost: true });
     if (Array.isArray(parsed?.agenda)) return { agenda: parsed.agenda };
   }
 
@@ -374,7 +377,7 @@ async function buildSlides(body) {
       'Fact checks:',
       JSON.stringify(checks)
     ].join('\n');
-    const parsed = await tryLlmJson(prompt, { webSearch: true, imageSearch: true });
+    const parsed = await tryLlmJson(prompt, { lowCost: true });
     if (Array.isArray(parsed?.slides)) {
       slideResult = {
         slides: parsed.slides.slice(0, 16),
@@ -471,7 +474,7 @@ function wordBucketToSegment(words, index) {
 
 async function llmJson(input, opts = {}) {
   const payload = {
-    model: llmModel,
+    model: selectLlmModel(opts),
     input,
     temperature: 0.2
   };
@@ -499,6 +502,12 @@ async function llmJson(input, opts = {}) {
   const data = await response.json();
   const text = data.output_text || collectOutputText(data);
   return parseJsonLoose(text);
+}
+
+function selectLlmModel(opts = {}) {
+  if (opts.webSearch || opts.imageSearch) return llmModel;
+  if (opts.lowCost && llmProvider === 'xai') return lowCostLlmModel;
+  return llmModel;
 }
 
 async function tryLlmJson(input, opts = {}) {
