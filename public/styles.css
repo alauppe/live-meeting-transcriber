@@ -653,9 +653,14 @@ input[type="file"] {
 
 .slide-card {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(240px, 0.42fr);
+  grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.65fr);
   gap: clamp(20px, 5vw, 56px);
   min-height: 390px;
+}
+
+.slide-main {
+  display: grid;
+  align-content: start;
 }
 
 .slide-kicker {
@@ -670,9 +675,40 @@ input[type="file"] {
   max-width: 920px;
   margin: 0;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(2.6rem, 7vw, 6.7rem);
-  line-height: 0.9;
+  font-size: clamp(2.4rem, 5.8vw, 5.7rem);
+  line-height: 0.94;
   letter-spacing: -0.07em;
+}
+
+.presenter-bullets {
+  display: grid;
+  gap: clamp(12px, 1.8vw, 20px);
+  max-width: 900px;
+  margin: clamp(28px, 4vw, 48px) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.presenter-bullets li {
+  position: relative;
+  padding-left: 1.7rem;
+  color: #fff9e8;
+  font-size: clamp(1.25rem, 2vw, 2rem);
+  font-weight: 760;
+  line-height: 1.13;
+  text-wrap: balance;
+}
+
+.presenter-bullets li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.55em;
+  width: 0.72rem;
+  height: 0.72rem;
+  border-radius: 999px;
+  background: #f0c35b;
+  box-shadow: 0 0 0 6px rgba(240, 195, 91, 0.13);
 }
 
 .slide-quote {
@@ -688,7 +724,17 @@ input[type="file"] {
 .slide-side {
   display: grid;
   align-content: start;
-  gap: 18px;
+  gap: 14px;
+  min-width: 0;
+}
+
+.slide-side-title {
+  margin: 6px 0 -2px;
+  color: #f0c35b;
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .slide-bullets {
@@ -706,6 +752,53 @@ input[type="file"] {
   background: rgba(255, 249, 232, 0.08);
   line-height: 1.35;
   font-size: calc(1rem * var(--content-scale));
+}
+
+.callout-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.slide-callout {
+  display: grid;
+  gap: 5px;
+  border: 1px solid rgba(255, 249, 232, 0.18);
+  border-radius: 18px;
+  padding: 13px 14px;
+  color: #fff9e8;
+  background: rgba(255, 249, 232, 0.08);
+  line-height: 1.28;
+  text-decoration: none;
+}
+
+.slide-callout strong {
+  color: #f0c35b;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.slide-callout span {
+  font-size: 0.96rem;
+}
+
+.slide-callout small {
+  color: rgba(255, 249, 232, 0.68);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.lookup-callout {
+  background: rgba(29, 89, 102, 0.42);
+}
+
+.fact-callout {
+  background: rgba(75, 33, 24, 0.42);
+}
+
+a.slide-callout:hover {
+  border-color: rgba(240, 195, 91, 0.52);
+  text-decoration: none;
 }
 
 .pending-updates li {

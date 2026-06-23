@@ -991,13 +991,19 @@ function renderSlide() {
   const slide = item.slide || {};
   const section = item.section;
   const assets = (slide.assets || []).slice(0, 4);
+  const bullets = ((slide.bullets || []).length ? slide.bullets : fallbackPresenterBullets(slide)).slice(0, 5);
+  const lookupCallouts = (slide.lookupCallouts || []).slice(0, 3);
+  const factCallouts = (slide.factCallouts || []).slice(0, 3);
   const pending = section?.status === 'live' || !section ? state.slidePendingUpdates.slice(0, 5) : [];
   els.slideStage.classList.remove('empty');
   els.slideStage.innerHTML = `
     <div class="slide-card">
-      <div>
+      <div class="slide-main">
         <p class="slide-kicker">${escapeHtml(slide.kicker || section?.title || `Slide ${state.selectedSlideIndex + 1}`)}</p>
         <h3 class="slide-title">${escapeHtml(slide.title || 'Live slide')}</h3>
+        <ul class="presenter-bullets">
+          ${bullets.map((bullet) => `<li>${escapeHtml(bullet)}</li>`).join('')}
+        </ul>
         ${slide.quote ? `<blockquote class="slide-quote">“${escapeHtml(slide.quote)}”</blockquote>` : ''}
       </div>
       <aside class="slide-side">
@@ -1005,14 +1011,23 @@ function renderSlide() {
         ${section ? `<p>${escapeHtml(sectionRangeLabel(section))}</p>` : ''}
         ${state.slideTransitionReason ? `<p>${escapeHtml(state.slideTransitionReason)}</p>` : ''}
         ${pending.length ? `
-          <p class="slide-kicker">New points as speaker progresses</p>
+          <p class="slide-side-title">New points</p>
           <ul class="slide-bullets pending-updates">
             ${pending.map((item) => `<li>${escapeHtml(item.text)}</li>`).join('')}
           </ul>
         ` : ''}
-        <ul class="slide-bullets">
-          ${(slide.bullets || []).slice(0, 4).map((bullet) => `<li>${escapeHtml(bullet)}</li>`).join('')}
-        </ul>
+        ${lookupCallouts.length ? `
+          <p class="slide-side-title">Lookup context</p>
+          <div class="callout-stack">
+            ${lookupCallouts.map((callout) => renderLookupCallout(callout)).join('')}
+          </div>
+        ` : ''}
+        ${factCallouts.length ? `
+          <p class="slide-side-title">Fact-check focus</p>
+          <div class="callout-stack">
+            ${factCallouts.map((callout) => renderFactCallout(callout)).join('')}
+          </div>
+        ` : ''}
         <div class="links">
           ${assets.map((asset) => `
             <a class="asset-card" href="${escapeAttr(asset.url || '#')}" target="_blank" rel="noreferrer">
@@ -1024,6 +1039,40 @@ function renderSlide() {
     </div>
   `;
   renderAppShell();
+}
+
+function renderLookupCallout(callout) {
+  const body = `
+    <strong>${escapeHtml(callout.title || 'Lookup')}</strong>
+    <span>${escapeHtml(callout.detail || callout.summary || 'Context from live lookup.')}</span>
+  `;
+  if (callout.url) {
+    return `<a class="slide-callout lookup-callout" href="${escapeAttr(callout.url)}" target="_blank" rel="noreferrer">${body}</a>`;
+  }
+  return `<div class="slide-callout lookup-callout">${body}</div>`;
+}
+
+function renderFactCallout(callout) {
+  return `
+    <div class="slide-callout fact-callout">
+      <strong>${escapeHtml((callout.status || 'needs_review').replace('_', ' '))}</strong>
+      <span>${escapeHtml(callout.claim || 'Claim under review')}</span>
+      ${callout.evidence ? `<small>${escapeHtml(callout.evidence)}</small>` : ''}
+    </div>
+  `;
+}
+
+function fallbackPresenterBullets(slide) {
+  const items = [];
+  if (slide.kicker) items.push(slide.kicker);
+  if (slide.quote) items.push(slide.quote);
+  for (const callout of slide.lookupCallouts || []) {
+    if (callout.detail) items.push(callout.detail);
+  }
+  for (const callout of slide.factCallouts || []) {
+    if (callout.claim) items.push(`${(callout.status || 'needs_review').replace('_', ' ')}: ${callout.claim}`);
+  }
+  return items.filter(Boolean);
 }
 
 function slideDisplayItems() {

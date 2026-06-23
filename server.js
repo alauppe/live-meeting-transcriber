@@ -372,13 +372,15 @@ async function buildSlides(body) {
     'Update the on-screen slide deck based on topic changes, transcript quotes, researched topics, and fact-check context.',
     'Decide whether the current slide is too full and should be reduced, split, or advanced to the next topic slide.',
     'Slides can change during the presentation, but should converge into one coherent deck by the end.',
-    'Slides must be engaging presentation slides, not quote lists.',
-    'Each slide needs a strong title, one short quote at most, 3-5 synthesized bullets from that section of the talk, and a high-value fact-check or lookup callout when available.',
-    'Bullets should explain the section: decisions, implications, risks, action items, contrasts, and important claims. Do not repeat transcript quotes as bullets.',
+    'Slides must look like presenter slides, not quote cards or topic lists.',
+    'Each slide needs a strong title, one short quote at most, and 3-5 presenter bullets in the main body.',
+    'Presenter bullets should be concise talk-track bullets: decisions, implications, risks, action items, contrasts, and important claims. Do not repeat transcript quotes as bullets.',
+    'Embed high-value lookup details as lookupCallouts with a title, one-sentence detail, and optional URL.',
+    'Embed high-value fact checks as factCallouts with claim, status, and one-sentence evidence.',
     'Prioritize high-value fact checks: numerical claims, compliance/legal claims, superlatives, deadlines, pricing, medical/financial/scientific assertions, and provider/product capability claims.',
     'If a slide has a quote, keep it short and use bullets for analysis.',
     'If source links or image assets are known, include them in assets. Do not invent URLs.',
-    'Return compact JSON: {"activeSlideIndex":0,"transitionReason":"...","slides":[{"title":"...","kicker":"...","quote":"optional short quote","startSec":0,"bullets":["section insight","risk/action/decision","fact-check callout"],"assets":[{"title":"...","url":"...","type":"link|image"}]}]}.',
+    'Return compact JSON: {"activeSlideIndex":0,"transitionReason":"...","slides":[{"title":"...","kicker":"...","quote":"optional short quote","startSec":0,"bullets":["presenter bullet","presenter bullet"],"lookupCallouts":[{"title":"...","detail":"...","url":"optional"}],"factCallouts":[{"claim":"...","status":"supported|contradicted|uncertain|needs_review","evidence":"..."}],"assets":[{"title":"...","url":"...","type":"link|image"}]}]}.',
     '',
     `Trigger reason: ${reason}`,
     `Current active slide index: ${currentActiveIndex}`,
@@ -750,6 +752,8 @@ function localSlides(segments, topics, checks) {
     quote: pickShortQuote(latestSegments),
     startSec: segments[0]?.startSec || 0,
     bullets: buildSectionBullets(latestSegments, topics.slice(-3), highValueChecks).slice(0, 5),
+    lookupCallouts: lookupCallouts(topics.slice(-3)),
+    factCallouts: factCallouts(highValueChecks.slice(0, 2)),
     assets: topicAssets(topics.slice(-3))
   });
 
@@ -763,6 +767,8 @@ function localSlides(segments, topics, checks) {
       quote,
       startSec: topicSegments[0]?.startSec || nearestQuoteStart(segments, quote),
       bullets: buildTopicBullets(topic, topicSegments, relevantChecks).slice(0, 5),
+      lookupCallouts: lookupCallouts([topic]),
+      factCallouts: factCallouts(relevantChecks),
       assets: topicAssets([topic])
     });
   }
@@ -773,7 +779,9 @@ function localSlides(segments, topics, checks) {
       kicker: 'Fact-check focus',
       quote: '',
       startSec: 0,
-      bullets: highValueChecks.slice(0, 5).map((check) => `${check.status || 'needs_review'}: ${check.claim}`),
+      bullets: highValueChecks.slice(0, 5).map((check) => presenterBulletFromClaim(check.claim, check.status)),
+      lookupCallouts: [],
+      factCallouts: factCallouts(highValueChecks.slice(0, 5)),
       assets: highValueChecks.flatMap((check) => check.links || []).slice(0, 4).map((link) => ({ title: link.title, url: link.url, type: 'link' }))
     });
   }
@@ -788,11 +796,10 @@ function buildSectionBullets(segments, topics, checks) {
     bullets.push(sentence);
   }
   for (const topic of topics) {
-    if (topic?.summary) bullets.push(`Lookup context: ${topic.summary}`);
-    else if (topic?.title) bullets.push(`New topic introduced: ${topic.title}`);
+    if (topic?.title) bullets.push(`Connect ${topic.title} to the section's main decision or risk`);
   }
   for (const check of checks.slice(0, 2)) {
-    bullets.push(`Fact-check: ${check.claim}`);
+    bullets.push(presenterBulletFromClaim(check.claim, check.status));
   }
   return ensureBullets(bullets, text);
 }
@@ -801,10 +808,31 @@ function buildTopicBullets(topic, segments, checks) {
   const text = segments.map((seg) => seg.text).join(' ');
   const bullets = [];
   if (topic.summary) bullets.push(topic.summary);
-  if (topic.whyRelevant) bullets.push(topic.whyRelevant);
+  if (topic.whyRelevant) bullets.push(`Why it matters: ${topic.whyRelevant}`);
   for (const sentence of importantSentences(text).slice(0, 3)) bullets.push(sentence);
-  for (const check of checks) bullets.push(`Verify: ${check.claim}`);
+  for (const check of checks) bullets.push(presenterBulletFromClaim(check.claim, check.status));
   return ensureBullets(bullets, text);
+}
+
+function lookupCallouts(topics) {
+  return (topics || []).filter(Boolean).slice(0, 3).map((topic) => ({
+    title: topic.title || 'Lookup',
+    detail: topic.summary || topic.whyRelevant || 'Lookup context from the current section.',
+    url: topic.links?.[0]?.url || ''
+  }));
+}
+
+function factCallouts(checks) {
+  return (checks || []).filter(Boolean).slice(0, 3).map((check) => ({
+    claim: check.claim || '',
+    status: check.status || 'needs_review',
+    evidence: check.evidence || 'High-value claim detected for review.'
+  })).filter((check) => check.claim);
+}
+
+function presenterBulletFromClaim(claim, status = 'needs_review') {
+  const prefix = status === 'supported' ? 'Use confidently' : status === 'contradicted' ? 'Do not repeat without correction' : 'Verify before relying on';
+  return `${prefix}: ${claim}`;
 }
 
 function ensureBullets(bullets, fallbackText) {
