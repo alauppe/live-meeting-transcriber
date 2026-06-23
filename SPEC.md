@@ -121,6 +121,10 @@ Production should replace the simple browser DSP with a dedicated media worker u
 - The live analysis loop must detect topic changes and decide when a new lookup should trigger a slide transition.
 - The slide loop must continuously evaluate whether the current slide is too dense, should be reduced, should be split, or should advance to the next topic.
 - Slides can change during the presentation.
+- Slides are section artifacts, not only a replaceable live deck.
+- During a section, the app maintains one live/draft section slide.
+- When topic transition indicates a section is over, the app freezes the previous section slide as a closed historical visual aid.
+- Closed section slides must remain browsable in the Slides timeline so the user can look back at useful visuals for earlier sections.
 - After the talk, the app must produce one coherent final slide deck.
 - The app must retain previous versions of generated slides for auditability, comparison, and rollback.
 - Each slide version should store `meetingId`, `version`, `reason`, `activeSlideIndex`, `transitionReason`, `slides`, and `createdAt`.

@@ -22,9 +22,11 @@ const state = {
   checks: [],
   agendaItems: [],
   slides: [],
+  slideSections: [],
   slideVersion: 0,
   slideTransitionReason: '',
   selectedSlideIndex: 0,
+  activeSlideSectionId: null,
   selectedTopicSlug: null,
   selectedFactIndex: 0,
   selectedAgendaIndex: 0,
@@ -404,9 +406,11 @@ function loadSegments(segments, source = 'upload', options = {}) {
   state.checks = [];
   state.agendaItems = [];
   state.slides = [];
+  state.slideSections = [];
   state.slideVersion = 0;
   state.slideTransitionReason = '';
   state.selectedSlideIndex = 0;
+  state.activeSlideSectionId = null;
   state.selectedTopicSlug = null;
   state.lastTopicRunAtSegment = 0;
   state.lastFactRunAtSegment = 0;
@@ -598,12 +602,15 @@ async function refreshTopics(segmentScope = state.segments.slice(-6), options = 
   if (!recent.trim()) return;
   try {
     const result = await api('/api/topics', { recentText: recent, transcript: scopedSegments, existingTopics });
+    const addedTopics = [];
     for (const topic of result.topics || []) {
       const topicSlug = slugify(topic.title);
       if (!topicSlug || state.topics.some((item) => item.slug === topicSlug)) continue;
       state.topics.push({ ...topic, slug: topicSlug, createdAt: Date.now() });
       state.selectedTopicSlug = topicSlug;
+      addedTopics.push({ ...topic, slug: topicSlug });
     }
+    if (addedTopics.length) startSlideSectionForTopic(addedTopics[addedTopics.length - 1]);
     renderTopics();
     if (options.scheduleSlides !== false) scheduleSlideLoop('topic-change');
   } catch (error) {
@@ -816,10 +823,108 @@ function scheduleSlideReplacement(reason) {
   state.slideReplacementTimer = setTimeout(() => buildSlides(reason), delay);
 }
 
+function startSlideSectionForTopic(topic) {
+  const topicSlug = slugify(topic?.title || '');
+  const active = activeSlideSection();
+  if (active && active.topicSlug === topicSlug) return active;
+  closeActiveSlideSection('topic transition');
+  const latestSegment = state.segments[state.segments.length - 1];
+  const section = {
+    id: crypto.randomUUID(),
+    title: topic?.title || 'Live section',
+    topicSlug,
+    startSec: latestSegment?.startSec || state.lastSegmentEnd || 0,
+    endSec: null,
+    status: 'live',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    slide: null
+  };
+  state.slideSections.push(section);
+  state.activeSlideSectionId = section.id;
+  state.selectedSlideIndex = state.slideSections.length - 1;
+  return section;
+}
+
+function ensureActiveSlideSection(title = 'Live section') {
+  const active = activeSlideSection();
+  if (active) return active;
+  const latestSegment = state.segments[state.segments.length - 1];
+  const section = {
+    id: crypto.randomUUID(),
+    title,
+    topicSlug: '',
+    startSec: latestSegment?.startSec || 0,
+    endSec: null,
+    status: 'live',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    slide: null
+  };
+  state.slideSections.push(section);
+  state.activeSlideSectionId = section.id;
+  state.selectedSlideIndex = state.slideSections.length - 1;
+  return section;
+}
+
+function closeActiveSlideSection(reason = 'section complete') {
+  const section = activeSlideSection();
+  if (!section || section.status === 'closed') return;
+  const latestSegment = state.segments[state.segments.length - 1];
+  section.status = 'closed';
+  section.endSec = latestSegment?.startSec || latestSegment?.endSec || state.lastSegmentEnd || section.startSec;
+  section.updatedAt = Date.now();
+  section.closeReason = reason;
+  if (!section.slide && state.slides[state.selectedSlideIndex]) {
+    section.slide = cloneSlide(state.slides[state.selectedSlideIndex]);
+  }
+}
+
+function activeSlideSection() {
+  return state.slideSections.find((section) => section.id === state.activeSlideSectionId && section.status === 'live');
+}
+
+function updateActiveSlideSection(slide, reason) {
+  if (!slide) return;
+  const section = ensureActiveSlideSection(slide.title || 'Live section');
+  section.title = slide.title || section.title;
+  section.startSec = Math.min(Number(section.startSec || 0), Number(slide.startSec || section.startSec || 0));
+  section.status = 'live';
+  section.updatedAt = Date.now();
+  section.updateReason = reason;
+  section.slide = cloneSlide(slide);
+  state.activeSlideSectionId = section.id;
+  state.selectedSlideIndex = Math.max(0, state.slideSections.findIndex((item) => item.id === section.id));
+}
+
+function rebuildSlideSectionsFromDeck(slides, reason) {
+  state.slideSections = (slides || []).map((slide, index) => ({
+    id: crypto.randomUUID(),
+    title: slide.title || `Section slide ${index + 1}`,
+    topicSlug: slugify(slide.title || ''),
+    startSec: Number(slide.startSec || 0),
+    endSec: null,
+    status: reason === 'final' || reason === 'loaded-talk' ? 'closed' : index === slides.length - 1 ? 'live' : 'closed',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    slide: cloneSlide(slide)
+  }));
+  const liveIndex = state.slideSections.findIndex((section) => section.status === 'live');
+  state.activeSlideSectionId = liveIndex >= 0 ? state.slideSections[liveIndex].id : null;
+  state.selectedSlideIndex = state.slideSections.length ? Math.max(0, liveIndex >= 0 ? liveIndex : state.slideSections.length - 1) : 0;
+}
+
+function cloneSlide(slide) {
+  return JSON.parse(JSON.stringify(slide || {}));
+}
+
 async function buildSlides(reason = 'manual') {
   if (!state.segments.length && !state.topics.length) {
     els.slideStage.textContent = 'No transcript or topics are available yet.';
     return;
+  }
+  if (!state.slideSections.length && reason !== 'loaded-talk' && reason !== 'final') {
+    ensureActiveSlideSection(state.topics[state.topics.length - 1]?.title || 'Live section');
   }
   els.slideStage.classList.remove('empty');
   if (!state.slides.length) {
@@ -829,13 +934,14 @@ async function buildSlides(reason = 'manual') {
     renderSlide();
   }
   try {
+    const currentSlideContext = slidePromptDeck();
     const result = await api('/api/slides', {
       meetingId: state.meetingId,
       reason,
       segments: state.segments,
       topics: state.topics,
       checks: state.checks,
-      currentSlides: state.slides,
+      currentSlides: currentSlideContext,
       activeSlideIndex: state.selectedSlideIndex
     });
     const incomingSlides = result.slides || [];
@@ -849,6 +955,12 @@ async function buildSlides(reason = 'manual') {
       Number.isFinite(result.activeSlideIndex) ? result.activeSlideIndex : state.selectedSlideIndex,
       Math.max(0, state.slides.length - 1)
     );
+    if (reason === 'loaded-talk' || reason === 'final') {
+      rebuildSlideSectionsFromDeck(state.slides, reason);
+    } else {
+      const activeSlide = state.slides[state.selectedSlideIndex] || state.slides[0];
+      updateActiveSlideSection(activeSlide, reason);
+    }
     renderSlide();
     renderAppShell();
     persistCurrentTalk('Slides updated');
@@ -860,32 +972,37 @@ async function buildSlides(reason = 'manual') {
 }
 
 function selectSlide(index) {
-  if (!state.slides.length) return;
-  const last = state.slides.length - 1;
+  const items = slideDisplayItems();
+  if (!items.length) return;
+  const last = items.length - 1;
   state.selectedSlideIndex = index < 0 ? last : index > last ? 0 : index;
   renderSlide();
 }
 
 function renderSlide() {
-  if (!state.slides.length) {
+  const items = slideDisplayItems();
+  if (!items.length) {
     els.slideStage.classList.add('empty');
     els.slideStage.textContent = 'Slides will combine live topics, talk quotes, fact-check context, and lookup assets.';
     return;
   }
 
-  const slide = state.slides[state.selectedSlideIndex] || state.slides[0];
+  const item = items[state.selectedSlideIndex] || items[0];
+  const slide = item.slide || {};
+  const section = item.section;
   const assets = (slide.assets || []).slice(0, 4);
-  const pending = state.slidePendingUpdates.slice(0, 5);
+  const pending = section?.status === 'live' || !section ? state.slidePendingUpdates.slice(0, 5) : [];
   els.slideStage.classList.remove('empty');
   els.slideStage.innerHTML = `
     <div class="slide-card">
       <div>
-        <p class="slide-kicker">${escapeHtml(slide.kicker || `Slide ${state.selectedSlideIndex + 1}`)}</p>
+        <p class="slide-kicker">${escapeHtml(slide.kicker || section?.title || `Slide ${state.selectedSlideIndex + 1}`)}</p>
         <h3 class="slide-title">${escapeHtml(slide.title || 'Live slide')}</h3>
         ${slide.quote ? `<blockquote class="slide-quote">“${escapeHtml(slide.quote)}”</blockquote>` : ''}
       </div>
       <aside class="slide-side">
-        <span class="slide-count">${state.selectedSlideIndex + 1} / ${state.slides.length} · v${state.slideVersion || 1}</span>
+        <span class="slide-count">${state.selectedSlideIndex + 1} / ${items.length} · ${escapeHtml(section?.status || 'deck')} · v${state.slideVersion || 1}</span>
+        ${section ? `<p>${escapeHtml(sectionRangeLabel(section))}</p>` : ''}
         ${state.slideTransitionReason ? `<p>${escapeHtml(state.slideTransitionReason)}</p>` : ''}
         ${pending.length ? `
           <p class="slide-kicker">New points as speaker progresses</p>
@@ -909,10 +1026,44 @@ function renderSlide() {
   renderAppShell();
 }
 
+function slideDisplayItems() {
+  if (state.slideSections.length) {
+    const sectionItems = state.slideSections
+      .filter((section) => section.slide)
+      .map((section) => ({ slide: section.slide, section }));
+    if (sectionItems.length) return sectionItems;
+  }
+  return state.slides.map((slide) => ({ slide, section: null }));
+}
+
+function slidePromptDeck() {
+  const sectionSlides = state.slideSections
+    .filter((section) => section.slide)
+    .map((section) => ({
+      ...section.slide,
+      sectionStatus: section.status,
+      sectionStartSec: section.startSec,
+      sectionEndSec: section.endSec
+    }));
+  return sectionSlides.length ? sectionSlides : state.slides;
+}
+
+function selectedSlideItem() {
+  const items = slideDisplayItems();
+  return items[state.selectedSlideIndex] || items[0] || null;
+}
+
+function sectionRangeLabel(section) {
+  const start = formatTime(section.startSec || 0);
+  if (section.status === 'live') return `Live section started ${start}`;
+  if (section.endSec !== null && section.endSec !== undefined) return `Section ${start}-${formatTime(section.endSec)}`;
+  return `Section started ${start}`;
+}
+
 function setScreen(screen) {
   state.activeScreen = screen || 'lookups';
   renderAppShell();
-  if (state.activeScreen === 'slides' && !state.slides.length) buildSlides('manual');
+  if (state.activeScreen === 'slides' && !slideDisplayItems().length) buildSlides('manual');
 }
 
 function renderAppShell() {
@@ -955,11 +1106,13 @@ function renderPulsePane() {
     els.latestFactMini.textContent = 'No claims yet.';
   }
 
-  const currentSlide = state.slides[state.selectedSlideIndex];
+  const currentSlideItem = selectedSlideItem();
+  const currentSlide = currentSlideItem?.slide;
   if (currentSlide) {
     els.latestSlideMini.classList.remove('empty');
     const pending = state.slidePendingUpdates[0]?.text;
-    els.latestSlideMini.innerHTML = `<strong>${escapeHtml(currentSlide.title || 'Current slide')}</strong>${escapeHtml(pending || state.slideTransitionReason || 'Slide is stable.')}`;
+    const status = currentSlideItem.section?.status === 'closed' ? 'Frozen section slide.' : 'Slide is live.';
+    els.latestSlideMini.innerHTML = `<strong>${escapeHtml(currentSlide.title || 'Current slide')}</strong>${escapeHtml(pending || state.slideTransitionReason || status)}`;
   } else {
     els.latestSlideMini.classList.add('empty');
     els.latestSlideMini.textContent = 'No slide yet.';
@@ -1051,13 +1204,14 @@ function sectionItemsForScreen() {
     }));
   }
   if (state.activeScreen === 'slides') {
-    return state.slides.map((slide, index) => ({
+    const items = slideDisplayItems();
+    return items.map((item, index) => ({
       id: String(index),
       action: 'slide',
-      label: slide.title || `Slide ${index + 1}`,
-      meta: `${index + 1} / ${state.slides.length}`,
+      label: item.slide.title || item.section?.title || `Slide ${index + 1}`,
+      meta: item.section ? `${item.section.status} · ${formatTime(item.section.startSec || 0)}` : `${index + 1} / ${items.length}`,
       active: index === state.selectedSlideIndex
-    }));
+    })).reverse();
   }
   if (state.activeScreen === 'agenda') {
     return [...state.agendaItems].reverse().map((item, displayIndex) => {
@@ -1133,7 +1287,7 @@ function renderPreviousTalkDetail() {
     <h3>${escapeHtml(talk.title || 'Saved talk')}</h3>
     <p><strong>Updated:</strong> ${escapeHtml(new Date(talk.updatedAt || talk.createdAt).toLocaleString())}</p>
     <p><strong>Transcript lines:</strong> ${talk.segments?.length || 0}</p>
-    <p><strong>Topics:</strong> ${talk.topics?.length || 0} · <strong>Fact checks:</strong> ${talk.checks?.length || 0} · <strong>Slides:</strong> ${talk.slides?.length || 0}</p>
+    <p><strong>Topics:</strong> ${talk.topics?.length || 0} · <strong>Fact checks:</strong> ${talk.checks?.length || 0} · <strong>Slides:</strong> ${talk.slideSections?.length || talk.slides?.length || 0}</p>
     <button id="loadPreviousTalkBtn" class="primary" type="button">Load this talk</button>
     <button id="analyzePreviousTalkBtn" type="button">Analyze this talk</button>
     <button id="deletePreviousTalkBtn" type="button">Delete saved copy</button>
@@ -1155,9 +1309,12 @@ function loadSavedTalk(id) {
   state.checks = talk.checks || [];
   state.agendaItems = talk.agendaItems || [];
   state.slides = talk.slides || [];
+  state.slideSections = talk.slideSections || [];
   state.slideVersion = talk.slideVersion || 0;
   state.slideTransitionReason = talk.slideTransitionReason || '';
-  state.selectedSlideIndex = 0;
+  state.activeSlideSectionId = state.slideSections.find((section) => section.status === 'live')?.id || null;
+  const activeSectionIndex = state.slideSections.findIndex((section) => section.id === state.activeSlideSectionId);
+  state.selectedSlideIndex = activeSectionIndex >= 0 ? activeSectionIndex : 0;
   state.selectedTopicSlug = state.topics[state.topics.length - 1]?.slug || state.topics[0]?.slug || null;
   state.selectedFactIndex = 0;
   state.selectedAgendaIndex = 0;
@@ -1199,6 +1356,7 @@ function persistCurrentTalk(reason = 'Updated') {
     checks: state.checks,
     agendaItems: state.agendaItems,
     slides: state.slides,
+    slideSections: state.slideSections,
     slideVersion: state.slideVersion,
     slideTransitionReason: state.slideTransitionReason
   };

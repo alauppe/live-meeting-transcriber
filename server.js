@@ -969,6 +969,7 @@ function normalizeTalkSnapshot(rawTalk = {}) {
     checks: Array.isArray(rawTalk.checks) ? rawTalk.checks.slice(0, 100) : [],
     agendaItems: Array.isArray(rawTalk.agendaItems) ? rawTalk.agendaItems.slice(0, 100) : [],
     slides: Array.isArray(rawTalk.slides) ? rawTalk.slides.slice(0, 100) : [],
+    slideSections: Array.isArray(rawTalk.slideSections) ? rawTalk.slideSections.slice(0, 100) : [],
     slideVersion: Number(rawTalk.slideVersion || 0),
     slideTransitionReason: String(rawTalk.slideTransitionReason || '').slice(0, 500)
   };

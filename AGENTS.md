@@ -92,6 +92,10 @@ The prototype is intentionally simple: Node server, browser UI, xAI STT/LLM inte
 - Avoid repeating transcript quotes as bullet points.
 - Prioritize high-value fact checks: numerical claims, compliance/legal claims, superlatives, deadlines, pricing, medical/financial/scientific assertions, and provider/product capability claims.
 - Slides can change during the talk, but should remain readable.
+- Treat slides as section artifacts:
+  - One live/draft section slide can update while the speaker is in that section.
+  - On topic transition, freeze the previous section slide as a closed historical artifact.
+  - Keep closed section slides available in the Slides timeline so the user can look back at visuals that would have supported earlier sections.
 - Fast loop should add new bullet points/supporting notes/assets to the current slide.
 - Slow loop should replace or restructure slides less frequently.
 - Never remove the visible old slide until the replacement deck is fully ready.
