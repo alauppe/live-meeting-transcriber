@@ -245,7 +245,7 @@ async function answerQuestion(body) {
       '',
       `Question: ${question}`
     ].join('\n');
-    const parsed = await llmJson(prompt);
+    const parsed = await tryLlmJson(prompt);
     if (parsed?.answer) return { answer: String(parsed.answer), citations: Array.isArray(parsed.citations) ? parsed.citations : [] };
   }
 
@@ -268,7 +268,7 @@ async function findTopics(body) {
       '',
       recentText
     ].join('\n');
-    const parsed = await llmJson(prompt, { webSearch: true });
+    const parsed = await tryLlmJson(prompt, { webSearch: true });
     if (Array.isArray(parsed?.topics)) {
       return { topics: parsed.topics.filter((topic) => topic?.title && !existing.has(slug(topic.title))).slice(0, 5) };
     }
@@ -279,7 +279,7 @@ async function findTopics(body) {
     .slice(0, 5)
     .map((topic) => ({
       title: topic,
-      summary: `Research placeholder for "${topic}". Add OPENAI_API_KEY to generate a live source-backed brief.`,
+      summary: `Research placeholder for "${topic}". Add X_AI_API_KEY with available credits to generate a live source-backed brief.`,
       whyRelevant: 'Mentioned by the speaker in the recent transcript.',
       searchQuery: topic,
       links: searchLinks(topic)
@@ -301,7 +301,7 @@ async function factCheck(body) {
       '',
       recentText
     ].join('\n');
-    const parsed = await llmJson(prompt, { webSearch: true });
+    const parsed = await tryLlmJson(prompt, { webSearch: true });
     if (Array.isArray(parsed?.checks)) return { checks: parsed.checks.slice(0, 6) };
   }
 
@@ -309,7 +309,7 @@ async function factCheck(body) {
     claim,
     status: 'needs_review',
     confidence: 0.35,
-    evidence: 'Potential factual claim detected locally. Add OPENAI_API_KEY for source-backed verification.',
+    evidence: 'Potential factual claim detected locally. Add X_AI_API_KEY with available credits for source-backed verification.',
     links: searchLinks(claim)
   }));
 
@@ -327,7 +327,7 @@ async function buildAgenda(body) {
       '',
       transcriptText(segments)
     ].join('\n');
-    const parsed = await llmJson(prompt);
+    const parsed = await tryLlmJson(prompt);
     if (Array.isArray(parsed?.agenda)) return { agenda: parsed.agenda };
   }
 
@@ -370,7 +370,7 @@ async function buildSlides(body) {
       'Fact checks:',
       JSON.stringify(checks)
     ].join('\n');
-    const parsed = await llmJson(prompt, { webSearch: true, imageSearch: true });
+    const parsed = await tryLlmJson(prompt, { webSearch: true, imageSearch: true });
     if (Array.isArray(parsed?.slides)) {
       slideResult = {
         slides: parsed.slides.slice(0, 16),
@@ -488,12 +488,23 @@ async function llmJson(input, opts = {}) {
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`OpenAI request failed: ${response.status} ${text.slice(0, 500)}`);
+    const label = llmProvider === 'xai' ? 'xAI' : 'OpenAI';
+    throw new Error(`${label} request failed: ${response.status} ${text.slice(0, 500)}`);
   }
 
   const data = await response.json();
   const text = data.output_text || collectOutputText(data);
   return parseJsonLoose(text);
+}
+
+async function tryLlmJson(input, opts = {}) {
+  try {
+    return await llmJson(input, opts);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[llm-fallback] ${message}`);
+    return null;
+  }
 }
 
 function collectOutputText(data) {
