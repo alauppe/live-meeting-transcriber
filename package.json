@@ -1,0 +1,25 @@
+{
+  "name": "live-meeting-transcriber",
+  "version": "0.1.0",
+  "description": "Live meeting transcription, topic lookup, fact checking, agenda generation, and dynamic slide creation.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alauppe/live-meeting-transcriber.git"
+  },
+  "bugs": {
+    "url": "https://github.com/alauppe/live-meeting-transcriber/issues"
+  },
+  "homepage": "https://github.com/alauppe/live-meeting-transcriber#readme",
+  "type": "module",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

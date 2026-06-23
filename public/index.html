@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Live Meeting Transcriber</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-frame">
+      <aside class="main-nav" aria-label="Primary">
+        <div class="brand">
+          <span class="brand-mark">LT</span>
+          <span class="brand-text">Live Talk</span>
+        </div>
+        <nav class="nav-stack">
+          <button class="nav-btn active" data-screen="lookups">Lookups</button>
+          <button class="nav-btn" data-screen="transcript">Transcript</button>
+          <button class="nav-btn" data-screen="facts">Facts</button>
+          <button class="nav-btn" data-screen="slides">Slides</button>
+          <button class="nav-btn" data-screen="agenda">Agenda</button>
+          <button class="nav-btn" data-screen="previous">Previous</button>
+        </nav>
+        <div class="nav-controls">
+          <div id="statusPill" class="status idle">Idle</div>
+          <button id="startBtn" class="primary">Start</button>
+          <button id="stopBtn" disabled>Stop</button>
+          <button id="demoBtn">Demo line</button>
+        </div>
+      </aside>
+
+      <main class="workbench">
+        <header class="live-strip">
+          <div class="live-title">
+            <p class="eyebrow">Live meeting intelligence</p>
+            <h1 id="screenTitle">Live lookup tabs</h1>
+          </div>
+          <section class="latest-card">
+            <div class="latest-head">
+              <span>Latest transcript</span>
+              <span id="meetingLabel">Unsaved talk</span>
+            </div>
+            <div id="latestTranscript" class="latest-transcript empty">The last 3-4 transcript lines stay here during the talk.</div>
+            <div id="interim" class="interim"></div>
+            <form id="askForm" class="ask-form compact">
+              <textarea id="questionInput" placeholder="Ask the talk so far..."></textarea>
+              <button class="primary" type="submit">Ask</button>
+            </form>
+            <div id="answer" class="answer empty">Answers cite transcript timestamps when possible.</div>
+          </section>
+        </header>
+
+        <div class="screen-shell">
+          <aside id="sectionMenu" class="section-menu" aria-label="Section items"></aside>
+
+          <section class="screen active" data-screen-panel="lookups">
+            <div class="screen-head">
+              <div>
+                <p class="eyebrow">Live lookups</p>
+                <h2>Newest topics first</h2>
+              </div>
+            </div>
+            <article id="topicDetail" class="detail-card empty">New topics appear in the inner menu as the speaker introduces them.</article>
+          </section>
+
+          <section class="screen" data-screen-panel="transcript">
+            <div class="screen-head">
+              <div>
+                <p class="eyebrow">Transcript</p>
+                <h2>Newest lines at the top</h2>
+              </div>
+            </div>
+            <div id="transcript" class="transcript"></div>
+          </section>
+
+          <section class="screen" data-screen-panel="facts">
+            <div class="screen-head">
+              <div>
+                <p class="eyebrow">Realtime checks</p>
+                <h2>Claims needing review</h2>
+              </div>
+            </div>
+            <div id="factChecks" class="fact-list empty">Claims that need review will appear here.</div>
+          </section>
+
+          <section class="screen" data-screen-panel="slides">
+            <div class="screen-head">
+              <div>
+                <p class="eyebrow">Generated slides</p>
+                <h2>Live deck view</h2>
+              </div>
+              <div class="slide-actions">
+                <button id="prevSlideBtn">Prev</button>
+                <button id="buildSlidesBtn" class="primary">Build slides</button>
+                <button id="nextSlideBtn">Next</button>
+              </div>
+            </div>
+            <div id="slideStage" class="slide-stage empty">Slides combine live topics, talk quotes, fact-check context, and lookup assets.</div>
+          </section>
+
+          <section class="screen" data-screen-panel="agenda">
+            <div class="screen-head">
+              <div>
+                <p class="eyebrow">Agenda</p>
+                <h2>Linked talk sections</h2>
+              </div>
+              <button id="agendaBtn">Generate agenda</button>
+            </div>
+            <div id="agenda" class="agenda empty">Stop the meeting or generate an agenda to create linked sections.</div>
+          </section>
+
+          <section class="screen" data-screen-panel="previous">
+            <div class="screen-head">
+              <div>
+                <p class="eyebrow">Previous talk</p>
+                <h2>Load before starting</h2>
+              </div>
+            </div>
+            <form id="uploadForm" class="upload-form">
+              <input id="recordingInput" type="file" accept="audio/*,video/mp4,video/webm" />
+              <button type="submit">Transcribe upload</button>
+            </form>
+            <div id="uploadStatus" class="upload-status empty">Upload a prior talk or select a saved talk from the inner menu.</div>
+            <div id="previousTalkDetail" class="detail-card empty">Saved talks persist in this browser across npm restarts.</div>
+          </section>
+        </div>
+      </main>
+
+      <aside class="pulse-pane" aria-label="Live pulse">
+        <div class="pulse-head">
+          <p class="eyebrow">Live pulse</p>
+          <h2>Newest signals</h2>
+        </div>
+        <article class="pulse-card">
+          <span class="pulse-label">Latest lookup</span>
+          <div id="latestLookupMini" class="pulse-body empty">No lookup yet.</div>
+          <button class="pulse-link" data-pulse-screen="lookups">Open lookups</button>
+        </article>
+        <article class="pulse-card">
+          <span class="pulse-label">Latest fact check</span>
+          <div id="latestFactMini" class="pulse-body empty">No claims yet.</div>
+          <button class="pulse-link" data-pulse-screen="facts">Open facts</button>
+        </article>
+        <article class="pulse-card">
+          <span class="pulse-label">Slide loop</span>
+          <div id="latestSlideMini" class="pulse-body empty">No slide yet.</div>
+          <button class="pulse-link" data-pulse-screen="slides">Open slides</button>
+        </article>
+        <article class="pulse-card">
+          <span class="pulse-label">Latest line</span>
+          <div id="latestLineMini" class="pulse-body empty">No transcript yet.</div>
+          <button class="pulse-link" data-pulse-screen="transcript">Open transcript</button>
+        </article>
+      </aside>
+    </div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
