@@ -36,7 +36,8 @@ const state = {
   lastTopicRunAtSegment: 0,
   lastFactRunAtSegment: 0,
   lastSlideLoopSegment: 0,
-  lastSlideLoopTopicCount: 0
+  lastSlideLoopTopicCount: 0,
+  storageWarning: ''
 };
 
 const els = {
@@ -119,6 +120,7 @@ async function init() {
   } catch {
     setStatus('Local fallback', 'idle');
   }
+  await hydrateSavedTalksFromServer();
   renderPreviousTalkDetail();
 }
 
@@ -1025,7 +1027,12 @@ function renderPreviousTalkDetail() {
   const talk = state.savedTalks.find((item) => item.id === state.selectedPreviousTalkId);
   if (!talk) {
     els.previousTalkDetail.classList.add('empty');
-    els.previousTalkDetail.textContent = 'No saved talks yet. Upload a recording or start a live meeting to create one.';
+    els.previousTalkDetail.innerHTML = `
+      <p>No saved talks are visible for this app URL yet.</p>
+      <p>If the dev port changed, open the old URL once in this same browser. The app will migrate that port's saved talks into server storage.</p>
+      <p>Current origin: <code>${escapeHtml(window.location.origin)}</code></p>
+      ${state.storageWarning ? `<p><strong>Storage warning:</strong> ${escapeHtml(state.storageWarning)}</p>` : ''}
+    `;
     return;
   }
   els.previousTalkDetail.classList.remove('empty');
@@ -1095,6 +1102,7 @@ function persistCurrentTalk(reason = 'Updated') {
   if (existing?.createdAt) snapshot.createdAt = existing.createdAt;
   state.savedTalks = [snapshot, ...state.savedTalks.filter((talk) => talk.id !== state.meetingId)].slice(0, 20);
   saveSavedTalks(state.savedTalks);
+  saveTalkToServer(snapshot);
   state.selectedPreviousTalkId = state.meetingId;
   renderLatestTranscript();
 }
@@ -1102,8 +1110,28 @@ function persistCurrentTalk(reason = 'Updated') {
 function deleteSavedTalk(id) {
   state.savedTalks = state.savedTalks.filter((talk) => talk.id !== id);
   saveSavedTalks(state.savedTalks);
+  deleteTalkFromServer(id);
   state.selectedPreviousTalkId = state.savedTalks[0]?.id || null;
   renderAppShell();
+}
+
+async function hydrateSavedTalksFromServer() {
+  const localTalks = state.savedTalks;
+  try {
+    const response = await fetch('/api/talks');
+    if (!response.ok) throw new Error(`Saved talk sync failed: ${response.status}`);
+    const result = await response.json();
+    state.savedTalks = mergeSavedTalks(localTalks, result.talks || []);
+    if (!state.savedTalks.some((talk) => talk.id === state.selectedPreviousTalkId)) {
+      state.selectedPreviousTalkId = state.savedTalks[0]?.id || null;
+    }
+    saveSavedTalks(state.savedTalks);
+    renderAppShell();
+    renderPreviousTalkDetail();
+    for (const talk of localTalks) saveTalkToServer(talk);
+  } catch (error) {
+    state.storageWarning = error instanceof Error ? error.message : String(error);
+  }
 }
 
 function loadSavedTalks() {
@@ -1120,8 +1148,50 @@ function loadSavedTalks() {
 function saveSavedTalks(talks) {
   try {
     localStorage.setItem('liveMeetingTranscriber.talks', JSON.stringify(talks));
+    state.storageWarning = '';
+    return true;
+  } catch (error) {
+    state.storageWarning = `Browser storage failed: ${error instanceof Error ? error.message : String(error)}. Server storage will be used when available.`;
+    return false;
+  }
+}
+
+function mergeSavedTalks(...talkGroups) {
+  const byId = new Map();
+  for (const talk of talkGroups.flat()) {
+    if (!talk?.id) continue;
+    const existing = byId.get(talk.id);
+    const existingTime = Date.parse(existing?.updatedAt || existing?.createdAt || 0) || 0;
+    const talkTime = Date.parse(talk.updatedAt || talk.createdAt || 0) || 0;
+    if (!existing || talkTime >= existingTime) byId.set(talk.id, talk);
+  }
+  return Array.from(byId.values())
+    .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
+    .slice(0, 20);
+}
+
+async function saveTalkToServer(talk) {
+  try {
+    const response = await fetch('/api/talks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ talk })
+    });
+    if (!response.ok) throw new Error(`Server save failed: ${response.status}`);
   } catch {
-    // Local browser quota can be exceeded by long transcripts; SaaS storage replaces this.
+    // The browser copy still works; the UI surfaces server sync failures on startup.
+  }
+}
+
+async function deleteTalkFromServer(id) {
+  try {
+    await fetch('/api/talks/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    });
+  } catch {
+    // Local deletion should not be blocked by a transient server failure.
   }
 }
 

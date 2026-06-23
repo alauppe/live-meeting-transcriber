@@ -28,6 +28,8 @@ Open `http://127.0.0.1:5177`.
 
 If xAI is not configured and your browser does not support `SpeechRecognition`, use the `Add demo line` button to exercise the full product flow.
 
+Saved talks are written to browser localStorage and the local SQLite database under `data/meeting.sqlite`. If you previously saved a talk on a different dev port, open that old URL once in the same browser so the app can migrate that port's localStorage copy into SQLite.
+
 ## Provider Configuration
 
 ```bash

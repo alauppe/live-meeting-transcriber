@@ -108,7 +108,8 @@ The prototype is intentionally simple: Node server, browser UI, xAI STT/LLM inte
 
 - Prototype persistence:
   - Browser localStorage for saved talk snapshots.
-  - SQLite under `data/meeting.sqlite` for slide versions.
+  - SQLite under `data/meeting.sqlite` for slide versions and saved talk snapshots.
+  - On startup, browser localStorage talks should merge with server SQLite talks so dev port changes do not make previous talks disappear after migration.
 - SaaS target:
   - Auth, users, organizations/workspaces, memberships, roles.
   - Postgres for users, orgs, meetings, transcripts, topics, checks, decks, files, permissions, audit events.

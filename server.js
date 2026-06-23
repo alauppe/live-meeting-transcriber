@@ -48,9 +48,14 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/slide-versions') {
       return sendJson(res, listSlideVersions(url.searchParams.get('meetingId') || 'local'));
     }
+    if (req.method === 'GET' && url.pathname === '/api/talks') {
+      return sendJson(res, { talks: listSavedTalks() });
+    }
     if (req.method === 'POST' && url.pathname.startsWith('/api/')) {
       if (url.pathname === '/api/transcribe-upload') return sendJson(res, await transcribeUpload(req, url));
       const body = await readJson(req);
+      if (url.pathname === '/api/talks') return sendJson(res, { talk: saveTalkSnapshot(body.talk || body) });
+      if (url.pathname === '/api/talks/delete') return sendJson(res, deleteTalkSnapshot(body.id));
       if (url.pathname === '/api/ask') return sendJson(res, await answerQuestion(body));
       if (url.pathname === '/api/topics') return sendJson(res, await findTopics(body));
       if (url.pathname === '/api/fact-check') return sendJson(res, await factCheck(body));
@@ -188,6 +193,15 @@ function initDatabase(filePath) {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_slide_versions_meeting ON slide_versions(meeting_id, version);
+
+    CREATE TABLE IF NOT EXISTS saved_talks (
+      meeting_id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      snapshot_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_saved_talks_updated ON saved_talks(updated_at DESC);
   `);
   return database;
 }
@@ -883,6 +897,74 @@ function listSlideVersions(meetingId) {
       slidesJson: undefined
     }))
   };
+}
+
+function saveTalkSnapshot(rawTalk) {
+  const talk = normalizeTalkSnapshot(rawTalk);
+  db.prepare(`
+    INSERT INTO saved_talks (meeting_id, title, snapshot_json, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(meeting_id) DO UPDATE SET
+      title = excluded.title,
+      snapshot_json = excluded.snapshot_json,
+      created_at = MIN(saved_talks.created_at, excluded.created_at),
+      updated_at = excluded.updated_at
+      WHERE excluded.updated_at >= saved_talks.updated_at
+  `).run(talk.id, talk.title, JSON.stringify(talk), talk.createdAt, talk.updatedAt);
+  return talk;
+}
+
+function listSavedTalks() {
+  const rows = db.prepare(`
+    SELECT snapshot_json AS snapshotJson
+    FROM saved_talks
+    ORDER BY updated_at DESC
+    LIMIT 100
+  `).all();
+  return rows.map((row) => {
+    try {
+      return JSON.parse(row.snapshotJson);
+    } catch {
+      return null;
+    }
+  }).filter(Boolean);
+}
+
+function deleteTalkSnapshot(id) {
+  const meetingId = String(id || '').trim();
+  if (!meetingId) return { deleted: false };
+  const result = db.prepare('DELETE FROM saved_talks WHERE meeting_id = ?').run(meetingId);
+  return { deleted: result.changes > 0 };
+}
+
+function normalizeTalkSnapshot(rawTalk = {}) {
+  const now = new Date().toISOString();
+  const id = String(rawTalk.id || rawTalk.meetingId || '').trim();
+  if (!id) throw new Error('Saved talk id is required.');
+  const segments = normalizeSegments(rawTalk.segments);
+  if (!segments.length) throw new Error('Saved talk must include transcript segments.');
+  const createdAt = validIsoDate(rawTalk.createdAt) || now;
+  const updatedAt = validIsoDate(rawTalk.updatedAt) || now;
+  return {
+    id,
+    title: String(rawTalk.title || 'Saved talk').slice(0, 180),
+    reason: String(rawTalk.reason || 'Updated').slice(0, 180),
+    createdAt,
+    updatedAt,
+    lastSegmentEnd: Number(rawTalk.lastSegmentEnd || segments.at(-1)?.endSec || 0),
+    segments,
+    topics: Array.isArray(rawTalk.topics) ? rawTalk.topics.slice(0, 100) : [],
+    checks: Array.isArray(rawTalk.checks) ? rawTalk.checks.slice(0, 100) : [],
+    agendaItems: Array.isArray(rawTalk.agendaItems) ? rawTalk.agendaItems.slice(0, 100) : [],
+    slides: Array.isArray(rawTalk.slides) ? rawTalk.slides.slice(0, 100) : [],
+    slideVersion: Number(rawTalk.slideVersion || 0),
+    slideTransitionReason: String(rawTalk.slideTransitionReason || '').slice(0, 500)
+  };
+}
+
+function validIsoDate(value) {
+  const text = String(value || '');
+  return Number.isFinite(Date.parse(text)) ? text : null;
 }
 
 function pickQuote(segments) {
