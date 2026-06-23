@@ -81,6 +81,11 @@ The prototype is intentionally simple: Node server, browser UI, xAI STT/LLM inte
 ### Slides
 
 - Generate slides from topics, transcript quotes, fact-check context, and lookup assets.
+- Slides should be engaging section-level synthesis, not headers plus quote lists.
+- Each slide should have a strong title, at most one short quote, 3-5 synthesized bullets from that section of the talk, high-value fact-check callouts where available, and lookup/source assets.
+- Bullets should capture decisions, implications, risks, action items, contrasts, and important claims from the current section.
+- Avoid repeating transcript quotes as bullet points.
+- Prioritize high-value fact checks: numerical claims, compliance/legal claims, superlatives, deadlines, pricing, medical/financial/scientific assertions, and provider/product capability claims.
 - Slides can change during the talk, but should remain readable.
 - Fast loop should add new bullet points/supporting notes/assets to the current slide.
 - Slow loop should replace or restructure slides less frequently.

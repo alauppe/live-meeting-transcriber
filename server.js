@@ -351,9 +351,13 @@ async function buildSlides(body) {
       'Update the on-screen slide deck based on topic changes, transcript quotes, researched topics, and fact-check context.',
       'Decide whether the current slide is too full and should be reduced, split, or advanced to the next topic slide.',
       'Slides can change during the presentation, but should converge into one coherent deck by the end.',
-      'Each slide should be useful on screen: concise title, one strong quote if available, 2-4 bullets, and lookup assets/links.',
+      'Slides must be engaging presentation slides, not quote lists.',
+      'Each slide needs a strong title, one short quote at most, 3-5 synthesized bullets from that section of the talk, and a high-value fact-check or lookup callout when available.',
+      'Bullets should explain the section: decisions, implications, risks, action items, contrasts, and important claims. Do not repeat transcript quotes as bullets.',
+      'Prioritize high-value fact checks: numerical claims, compliance/legal claims, superlatives, deadlines, pricing, medical/financial/scientific assertions, and provider/product capability claims.',
+      'If a slide has a quote, keep it short and use bullets for analysis.',
       'If source links or image assets are known, include them in assets. Do not invent URLs.',
-      'Return compact JSON: {"activeSlideIndex":0,"transitionReason":"...","slides":[{"title":"...","kicker":"...","quote":"...","startSec":0,"bullets":["..."],"assets":[{"title":"...","url":"...","type":"link|image"}]}]}.',
+      'Return compact JSON: {"activeSlideIndex":0,"transitionReason":"...","slides":[{"title":"...","kicker":"...","quote":"optional short quote","startSec":0,"bullets":["section insight","risk/action/decision","fact-check callout"],"assets":[{"title":"...","url":"...","type":"link|image"}]}]}.',
       '',
       `Trigger reason: ${reason}`,
       `Current active slide index: ${currentActiveIndex}`,
@@ -627,46 +631,135 @@ function localAgenda(segments) {
 
 function localSlides(segments, topics, checks) {
   const slides = [];
+  const latestSegments = segments.slice(-12);
+  const highValueChecks = rankHighValueChecks(checks);
   slides.push({
-    title: 'Talk in progress',
-    kicker: 'Live generated overview',
-    quote: pickQuote(segments),
+    title: inferTitle(latestSegments.map((seg) => seg.text).join(' '), 1),
+    kicker: 'Current section',
+    quote: pickShortQuote(latestSegments),
     startSec: segments[0]?.startSec || 0,
-    bullets: [
-      `${segments.length} transcript segments captured`,
-      `${topics.length} live lookup topics identified`,
-      `${checks.length} claims queued for review`
-    ],
-    assets: []
+    bullets: buildSectionBullets(latestSegments, topics.slice(-3), highValueChecks).slice(0, 5),
+    assets: topicAssets(topics.slice(-3))
   });
 
-  for (const topic of topics.slice(0, 7)) {
-    const quote = findQuoteForTopic(segments, topic.title) || pickQuote(segments);
+  for (const topic of topics.slice(-7).reverse()) {
+    const topicSegments = segmentsForTopic(segments, topic.title);
+    const quote = pickShortQuote(topicSegments);
+    const relevantChecks = highValueChecks.filter((check) => mentionsTopic(check.claim || '', topic.title)).slice(0, 2);
     slides.push({
       title: topic.title || 'Live topic',
       kicker: topic.whyRelevant || 'Topic introduced by the speaker',
       quote,
-      startSec: nearestQuoteStart(segments, quote),
-      bullets: [
-        topic.summary || 'Research brief pending.',
-        topic.whyRelevant || 'Mentioned in the talk.'
-      ].filter(Boolean),
-      assets: (topic.links || []).slice(0, 3).map((link) => ({ title: link.title, url: link.url, type: 'link' }))
+      startSec: topicSegments[0]?.startSec || nearestQuoteStart(segments, quote),
+      bullets: buildTopicBullets(topic, topicSegments, relevantChecks).slice(0, 5),
+      assets: topicAssets([topic])
     });
   }
 
-  if (checks.length) {
+  if (highValueChecks.length) {
     slides.push({
-      title: 'Claims to verify',
-      kicker: 'Realtime fact-check queue',
-      quote: checks[0]?.claim || '',
+      title: 'High-value claims to verify',
+      kicker: 'Fact-check focus',
+      quote: '',
       startSec: 0,
-      bullets: checks.slice(0, 4).map((check) => `${check.status || 'needs_review'}: ${check.claim}`),
-      assets: checks.flatMap((check) => check.links || []).slice(0, 3).map((link) => ({ title: link.title, url: link.url, type: 'link' }))
+      bullets: highValueChecks.slice(0, 5).map((check) => `${check.status || 'needs_review'}: ${check.claim}`),
+      assets: highValueChecks.flatMap((check) => check.links || []).slice(0, 4).map((link) => ({ title: link.title, url: link.url, type: 'link' }))
     });
   }
 
   return slides;
+}
+
+function buildSectionBullets(segments, topics, checks) {
+  const text = segments.map((seg) => seg.text).join(' ');
+  const bullets = [];
+  for (const sentence of importantSentences(text).slice(0, 3)) {
+    bullets.push(sentence);
+  }
+  for (const topic of topics) {
+    if (topic?.summary) bullets.push(`Lookup context: ${topic.summary}`);
+    else if (topic?.title) bullets.push(`New topic introduced: ${topic.title}`);
+  }
+  for (const check of checks.slice(0, 2)) {
+    bullets.push(`Fact-check: ${check.claim}`);
+  }
+  return ensureBullets(bullets, text);
+}
+
+function buildTopicBullets(topic, segments, checks) {
+  const text = segments.map((seg) => seg.text).join(' ');
+  const bullets = [];
+  if (topic.summary) bullets.push(topic.summary);
+  if (topic.whyRelevant) bullets.push(topic.whyRelevant);
+  for (const sentence of importantSentences(text).slice(0, 3)) bullets.push(sentence);
+  for (const check of checks) bullets.push(`Verify: ${check.claim}`);
+  return ensureBullets(bullets, text);
+}
+
+function ensureBullets(bullets, fallbackText) {
+  const cleaned = dedupeStrings(bullets)
+    .map((bullet) => compactBullet(bullet))
+    .filter((bullet) => bullet.length > 12);
+  if (cleaned.length) return cleaned;
+  return importantSentences(fallbackText).slice(0, 4).map(compactBullet);
+}
+
+function importantSentences(text) {
+  return String(text || '')
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length > 28)
+    .sort((a, b) => sentenceScore(b) - sentenceScore(a));
+}
+
+function sentenceScore(sentence) {
+  let score = Math.min(sentence.length / 80, 2);
+  if (/\b(need|must|should|required|risk|because|therefore|decision|decided|action|follow up|pricing|deadline|compliance|HIPAA|SOC 2|claim|verify|customer|product|support|feature)\b/i.test(sentence)) score += 3;
+  if (/\b(\d+%?|\$[\d,]+|\b\d{4}\b|always|never|first|largest|fastest|less than|more than)\b/i.test(sentence)) score += 2;
+  return score;
+}
+
+function compactBullet(text) {
+  const cleaned = String(text || '').replace(/\s+/g, ' ').trim();
+  return cleaned.length > 145 ? `${cleaned.slice(0, 142)}...` : cleaned;
+}
+
+function rankHighValueChecks(checks) {
+  return [...checks].sort((a, b) => claimScore(b.claim || '') - claimScore(a.claim || ''));
+}
+
+function claimScore(claim) {
+  let score = 0;
+  if (/\b(\d+%?|\$[\d,]+|\b\d{4}\b)\b/.test(claim)) score += 4;
+  if (/\b(HIPAA|SOC 2|legal|compliance|required|illegal|medical|financial|scientific|pricing|deadline)\b/i.test(claim)) score += 4;
+  if (/\b(always|never|all|none|first|largest|fastest|only|less than|more than)\b/i.test(claim)) score += 2;
+  return score;
+}
+
+function topicAssets(topics) {
+  return topics.flatMap((topic) => topic.links || []).slice(0, 4).map((link) => ({ title: link.title, url: link.url, type: 'link' }));
+}
+
+function segmentsForTopic(segments, topic) {
+  const words = tokenize(topic).filter((word) => word.length > 3);
+  const matching = segments.filter((seg) => words.some((word) => seg.text.toLowerCase().includes(word)));
+  if (matching.length) return matching.slice(-6);
+  return segments.slice(-6);
+}
+
+function mentionsTopic(text, topic) {
+  const words = tokenize(topic).filter((word) => word.length > 3);
+  return words.some((word) => text.toLowerCase().includes(word));
+}
+
+function dedupeStrings(items) {
+  const seen = new Set();
+  return items.filter((item) => {
+    const key = String(item || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function chooseLocalActiveSlide(slides, topics, currentActiveIndex) {
@@ -710,6 +803,15 @@ function listSlideVersions(meetingId) {
 function pickQuote(segments) {
   const sorted = [...segments].sort((a, b) => b.text.length - a.text.length);
   return sorted.find((seg) => seg.text.length > 50)?.text || segments[segments.length - 1]?.text || '';
+}
+
+function pickShortQuote(segments) {
+  const candidates = segments
+    .map((seg) => seg.text)
+    .filter((text) => text && text.length >= 45)
+    .sort((a, b) => sentenceScore(b) - sentenceScore(a));
+  const quote = candidates[0] || segments[segments.length - 1]?.text || '';
+  return quote.length > 170 ? `${quote.slice(0, 167)}...` : quote;
 }
 
 function findQuoteForTopic(segments, topic) {
