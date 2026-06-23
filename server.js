@@ -440,7 +440,7 @@ async function transcribeUpload(req, url) {
   if (!audio.length) throw new Error('No audio file was uploaded.');
 
   const filename = url.searchParams.get('filename') || 'recording.webm';
-  const mimeType = req.headers['content-type'] || url.searchParams.get('type') || 'application/octet-stream';
+  const mimeType = normalizeUploadMimeType(req.headers['content-type'] || url.searchParams.get('type'), filename);
   const language = url.searchParams.get('language') || 'en';
 
   const form = new FormData();
@@ -465,6 +465,18 @@ async function transcribeUpload(req, url) {
     duration: result.duration || 0,
     segments: wordsToSegments(result.words || [], result.text || '', result.duration || 0)
   };
+}
+
+function normalizeUploadMimeType(rawType, filename) {
+  const type = String(rawType || '').split(';')[0].trim();
+  if (type && type !== 'application/octet-stream') return type;
+  const lower = String(filename || '').toLowerCase();
+  if (lower.endsWith('.mp3')) return 'audio/mpeg';
+  if (lower.endsWith('.m4a')) return 'audio/mp4';
+  if (lower.endsWith('.wav')) return 'audio/wav';
+  if (lower.endsWith('.webm')) return 'audio/webm';
+  if (lower.endsWith('.mp4')) return 'video/mp4';
+  return type || 'application/octet-stream';
 }
 
 function wordsToSegments(words, text, duration) {

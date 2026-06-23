@@ -37,7 +37,9 @@ const state = {
   lastFactRunAtSegment: 0,
   lastSlideLoopSegment: 0,
   lastSlideLoopTopicCount: 0,
-  storageWarning: ''
+  storageWarning: '',
+  isUploadingRecording: false,
+  isAnalyzingRecording: false
 };
 
 const els = {
@@ -99,6 +101,7 @@ els.textSizeSelect.addEventListener('change', () => setTextSize(els.textSizeSele
 els.askForm.addEventListener('submit', askQuestion);
 els.agendaBtn.addEventListener('click', generateAgenda);
 els.uploadForm.addEventListener('submit', uploadRecording);
+els.recordingInput.addEventListener('change', uploadSelectedRecording);
 els.buildSlidesBtn.addEventListener('click', buildSlides);
 els.prevSlideBtn.addEventListener('click', () => selectSlide(state.selectedSlideIndex - 1));
 els.nextSlideBtn.addEventListener('click', () => selectSlide(state.selectedSlideIndex + 1));
@@ -417,10 +420,6 @@ function loadSegments(segments, source = 'upload', options = {}) {
   renderAgenda([]);
   renderSlide();
   renderAppShell();
-  runIntelligence().then(() => {
-    generateAgenda();
-    buildSlides('loaded-talk');
-  });
 }
 
 function renderTranscript() {
@@ -454,26 +453,69 @@ function renderLatestTranscript() {
 
 async function uploadRecording(event) {
   event.preventDefault();
+  await uploadSelectedRecording();
+}
+
+async function uploadSelectedRecording() {
+  if (state.isUploadingRecording) return;
   const file = els.recordingInput.files?.[0];
-  if (!file) return;
+  if (!file) {
+    els.uploadStatus.classList.remove('empty');
+    els.uploadStatus.textContent = 'Choose an audio or video file to transcribe.';
+    return;
+  }
+  if (!state.config.uploadTranscriptionEnabled) {
+    els.uploadStatus.classList.remove('empty');
+    els.uploadStatus.textContent = 'Recording upload requires X_AI_API_KEY on the server.';
+    return;
+  }
 
   els.uploadStatus.classList.remove('empty');
-  els.uploadStatus.textContent = `Uploading and transcribing ${file.name}...`;
+  state.isUploadingRecording = true;
+  setUploadBusy(true);
+  const contentType = file.type || mimeTypeForFile(file.name);
+  els.uploadStatus.textContent = `Uploading and transcribing ${file.name}. This can take a minute for long audio...`;
   try {
-    const params = new URLSearchParams({ filename: file.name, type: file.type || 'application/octet-stream', language: 'en' });
+    const params = new URLSearchParams({ filename: file.name, type: contentType, language: 'en' });
     const response = await fetch(`/api/transcribe-upload?${params.toString()}`, {
       method: 'POST',
-      headers: { 'Content-Type': file.type || 'application/octet-stream' },
+      headers: { 'Content-Type': contentType },
       body: file
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || `Upload failed: ${response.status}`);
+    if (!Array.isArray(result.segments) || !result.segments.length) {
+      throw new Error('Transcription finished but returned no timestamped transcript segments.');
+    }
     loadSegments(result.segments || [], 'upload', { title: file.name });
     persistCurrentTalk(`Uploaded ${file.name}`);
-    els.uploadStatus.textContent = `Loaded ${result.segments?.length || 0} transcript segments from ${file.name}.`;
+    await analyzeRecordedTalk(file.name);
+    els.uploadStatus.textContent = `Loaded and analyzed ${result.segments?.length || 0} transcript segments from ${file.name}.`;
   } catch (error) {
-    els.uploadStatus.textContent = error.message;
+    els.uploadStatus.textContent = error instanceof Error ? error.message : String(error);
+  } finally {
+    state.isUploadingRecording = false;
+    setUploadBusy(false);
   }
+}
+
+function setUploadBusy(isBusy) {
+  els.recordingInput.disabled = isBusy;
+  const submit = els.uploadForm.querySelector('button[type="submit"]');
+  if (submit) {
+    submit.disabled = isBusy;
+    submit.textContent = isBusy ? 'Transcribing...' : 'Transcribe selected file';
+  }
+}
+
+function mimeTypeForFile(filename = '') {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith('.mp3')) return 'audio/mpeg';
+  if (lower.endsWith('.m4a')) return 'audio/mp4';
+  if (lower.endsWith('.wav')) return 'audio/wav';
+  if (lower.endsWith('.webm')) return 'audio/webm';
+  if (lower.endsWith('.mp4')) return 'video/mp4';
+  return 'application/octet-stream';
 }
 
 async function askQuestion(event) {
@@ -513,11 +555,49 @@ async function runIntelligence() {
   }
 }
 
-async function refreshTopics() {
-  const recent = state.segments.slice(-6).map((seg) => seg.text).join(' ');
-  const existingTopics = state.topics.map((topic) => topic.title);
+async function analyzeRecordedTalk(label = 'uploaded recording') {
+  if (!state.segments.length) return;
+  if (state.isAnalyzingRecording) return;
+  state.isAnalyzingRecording = true;
+  const chunks = transcriptAnalysisChunks(state.segments);
+  els.uploadStatus.classList.remove('empty');
+  els.uploadStatus.textContent = `Transcript loaded. Analyzing ${chunks.length} sections from ${label}...`;
+
   try {
-    const result = await api('/api/topics', { recentText: recent, transcript: state.segments, existingTopics });
+    for (const [index, chunk] of chunks.entries()) {
+      els.uploadStatus.textContent = `Analyzing section ${index + 1} of ${chunks.length}: lookups and fact checks...`;
+      await refreshTopics(chunk, { scheduleSlides: false });
+      await refreshFactChecks(chunk, { scheduleSlides: false });
+      persistCurrentTalk(`Analyzed section ${index + 1}/${chunks.length}`);
+    }
+
+    els.uploadStatus.textContent = 'Building agenda from full transcript...';
+    await generateAgenda();
+    els.uploadStatus.textContent = 'Creating slide deck from full transcript, lookups, and fact checks...';
+    await buildSlides('loaded-talk');
+    persistCurrentTalk('Recorded talk analyzed');
+  } finally {
+    state.isAnalyzingRecording = false;
+  }
+}
+
+function transcriptAnalysisChunks(segments) {
+  const targetChunks = 10;
+  const chunkSize = Math.max(8, Math.ceil(segments.length / targetChunks));
+  const chunks = [];
+  for (let index = 0; index < segments.length; index += chunkSize) {
+    chunks.push(segments.slice(index, index + chunkSize));
+  }
+  return chunks;
+}
+
+async function refreshTopics(segmentScope = state.segments.slice(-6), options = {}) {
+  const scopedSegments = normalizeClientSegments(segmentScope);
+  const recent = scopedSegments.map((seg) => seg.text).join(' ');
+  const existingTopics = state.topics.map((topic) => topic.title);
+  if (!recent.trim()) return;
+  try {
+    const result = await api('/api/topics', { recentText: recent, transcript: scopedSegments, existingTopics });
     for (const topic of result.topics || []) {
       const topicSlug = slugify(topic.title);
       if (!topicSlug || state.topics.some((item) => item.slug === topicSlug)) continue;
@@ -525,10 +605,21 @@ async function refreshTopics() {
       state.selectedTopicSlug = topicSlug;
     }
     renderTopics();
-    scheduleSlideLoop('topic-change');
+    if (options.scheduleSlides !== false) scheduleSlideLoop('topic-change');
   } catch (error) {
     console.warn(error);
   }
+}
+
+function normalizeClientSegments(segments) {
+  return (segments || [])
+    .map((segment) => ({
+      id: segment.id,
+      startSec: Number(segment.startSec || 0),
+      endSec: Number(segment.endSec || segment.startSec || 0),
+      text: String(segment.text || '').trim()
+    }))
+    .filter((segment) => segment.text);
 }
 
 function renderTopics() {
@@ -576,20 +667,22 @@ function renderTopics() {
   renderAppShell();
 }
 
-async function refreshFactChecks() {
-  const recent = state.segments.slice(-8).map((seg) => seg.text).join(' ');
+async function refreshFactChecks(segmentScope = state.segments.slice(-8), options = {}) {
+  const scopedSegments = normalizeClientSegments(segmentScope);
+  const recent = scopedSegments.map((seg) => seg.text).join(' ');
+  if (!recent.trim()) return;
   try {
-    const result = await api('/api/fact-check', { recentText: recent, transcript: state.segments });
+    const result = await api('/api/fact-check', { recentText: recent, transcript: scopedSegments });
     const seen = new Set(state.checks.map((check) => check.claim.toLowerCase()));
     for (const check of result.checks || []) {
       if (!check.claim || seen.has(check.claim.toLowerCase())) continue;
       state.checks.unshift(check);
       seen.add(check.claim.toLowerCase());
     }
-    state.checks = state.checks.slice(0, 12);
+    state.checks = state.checks.slice(0, 30);
     state.selectedFactIndex = 0;
     renderFactChecks();
-    scheduleSlideLoop('fact-check-update');
+    if (options.scheduleSlides !== false) scheduleSlideLoop('fact-check-update');
   } catch (error) {
     console.warn(error);
   }
@@ -1042,9 +1135,11 @@ function renderPreviousTalkDetail() {
     <p><strong>Transcript lines:</strong> ${talk.segments?.length || 0}</p>
     <p><strong>Topics:</strong> ${talk.topics?.length || 0} · <strong>Fact checks:</strong> ${talk.checks?.length || 0} · <strong>Slides:</strong> ${talk.slides?.length || 0}</p>
     <button id="loadPreviousTalkBtn" class="primary" type="button">Load this talk</button>
+    <button id="analyzePreviousTalkBtn" type="button">Analyze this talk</button>
     <button id="deletePreviousTalkBtn" type="button">Delete saved copy</button>
   `;
   document.querySelector('#loadPreviousTalkBtn')?.addEventListener('click', () => loadSavedTalk(talk.id));
+  document.querySelector('#analyzePreviousTalkBtn')?.addEventListener('click', () => analyzeSavedTalk(talk.id));
   document.querySelector('#deletePreviousTalkBtn')?.addEventListener('click', () => deleteSavedTalk(talk.id));
 }
 
@@ -1075,6 +1170,15 @@ function loadSavedTalk(id) {
   renderSlide();
   setScreen('transcript');
   els.uploadStatus.textContent = `Loaded ${state.meetingTitle}. Press Start to continue listening into this talk.`;
+}
+
+async function analyzeSavedTalk(id) {
+  const talk = state.savedTalks.find((item) => item.id === id);
+  if (!talk) return;
+  loadSavedTalk(id);
+  setScreen('previous');
+  await analyzeRecordedTalk(talk.title || 'saved talk');
+  renderPreviousTalkDetail();
 }
 
 function persistCurrentTalk(reason = 'Updated') {
