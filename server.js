@@ -14,11 +14,14 @@ const port = Number(process.env.PORT || 5177);
 const host = process.env.HOST || '127.0.0.1';
 const xaiApiKey = process.env.X_AI_API_KEY || process.env.XAI_API_KEY || '';
 const openaiApiKey = process.env.OPENAI_API_KEY || '';
+const cerebrasApiKey = process.env.CEREBRAS_API_KEY || process.env.CEREBRAS_KEY || '';
 const llmProvider = xaiApiKey ? 'xai' : (openaiApiKey ? 'openai' : 'local');
 const llmApiKey = xaiApiKey || openaiApiKey;
 const llmModel = process.env.X_AI_MODEL || process.env.XAI_MODEL || process.env.OPENAI_MODEL || (xaiApiKey ? 'grok-4.3' : 'gpt-4.1-mini');
-const lowCostLlmModel = process.env.X_AI_LOW_COST_MODEL || process.env.XAI_LOW_COST_MODEL || (xaiApiKey ? 'grok-build-0.1' : llmModel);
+const fastLoopProvider = cerebrasApiKey ? 'cerebras' : 'local';
+const fastLoopModel = process.env.CEREBRAS_MODEL || process.env.CEREBRAS_FAST_MODEL || 'gpt-oss-120b';
 const llmResponsesUrl = xaiApiKey ? 'https://api.x.ai/v1/responses' : 'https://api.openai.com/v1/responses';
+const cerebrasChatUrl = process.env.CEREBRAS_CHAT_URL || 'https://api.cerebras.ai/v1/chat/completions';
 const db = initDatabase(path.join(__dirname, 'data', 'meeting.sqlite'));
 
 const server = http.createServer(async (req, res) => {
@@ -29,7 +32,8 @@ const server = http.createServer(async (req, res) => {
         sttProvider: xaiApiKey ? 'xai' : 'browser',
         llmProvider,
         llmModel,
-        lowCostLlmModel,
+        fastLoopProvider,
+        fastLoopModel: cerebrasApiKey ? fastLoopModel : null,
         uploadTranscriptionEnabled: Boolean(xaiApiKey),
         dspDefaults: {
           echoCancellation: true,
@@ -66,8 +70,10 @@ const server = http.createServer(async (req, res) => {
 server.listen(port, host, () => {
   console.log(`Live Meeting Transcriber listening at http://${host}:${port}`);
   console.log(xaiApiKey ? `xAI STT and analysis enabled with ${llmModel}` : 'xAI disabled; browser STT/local fallbacks available.');
-  if (xaiApiKey) console.log(`Low-cost xAI model for non-search synthesis: ${lowCostLlmModel}`);
   if (!xaiApiKey && openaiApiKey) console.log(`OpenAI analysis enabled with ${llmModel}`);
+  console.log(cerebrasApiKey
+    ? `Cerebras fast-loop synthesis enabled with ${fastLoopModel}`
+    : 'Cerebras fast-loop synthesis disabled; high-frequency slide loops use local fallbacks.');
 });
 
 const sttWss = new WebSocketServer({ noServer: true });
@@ -248,7 +254,7 @@ async function answerQuestion(body) {
       '',
       `Question: ${question}`
     ].join('\n');
-    const parsed = await tryLlmJson(prompt, { lowCost: true });
+    const parsed = await tryLlmJson(prompt);
     if (parsed?.answer) return { answer: String(parsed.answer), citations: Array.isArray(parsed.citations) ? parsed.citations : [] };
   }
 
@@ -330,7 +336,7 @@ async function buildAgenda(body) {
       '',
       transcriptText(segments)
     ].join('\n');
-    const parsed = await tryLlmJson(prompt, { lowCost: true });
+    const parsed = await tryLlmJson(prompt);
     if (Array.isArray(parsed?.agenda)) return { agenda: parsed.agenda };
   }
 
@@ -347,44 +353,43 @@ async function buildSlides(body) {
   const reason = String(body.reason || 'manual');
   if (!segments.length && !topics.length) return { slides: [] };
 
-  let slideResult;
-  if (llmApiKey) {
-    const prompt = [
-      'You are the live slide director for a talk in progress.',
-      'Update the on-screen slide deck based on topic changes, transcript quotes, researched topics, and fact-check context.',
-      'Decide whether the current slide is too full and should be reduced, split, or advanced to the next topic slide.',
-      'Slides can change during the presentation, but should converge into one coherent deck by the end.',
-      'Slides must be engaging presentation slides, not quote lists.',
-      'Each slide needs a strong title, one short quote at most, 3-5 synthesized bullets from that section of the talk, and a high-value fact-check or lookup callout when available.',
-      'Bullets should explain the section: decisions, implications, risks, action items, contrasts, and important claims. Do not repeat transcript quotes as bullets.',
-      'Prioritize high-value fact checks: numerical claims, compliance/legal claims, superlatives, deadlines, pricing, medical/financial/scientific assertions, and provider/product capability claims.',
-      'If a slide has a quote, keep it short and use bullets for analysis.',
-      'If source links or image assets are known, include them in assets. Do not invent URLs.',
-      'Return compact JSON: {"activeSlideIndex":0,"transitionReason":"...","slides":[{"title":"...","kicker":"...","quote":"optional short quote","startSec":0,"bullets":["section insight","risk/action/decision","fact-check callout"],"assets":[{"title":"...","url":"...","type":"link|image"}]}]}.',
-      '',
-      `Trigger reason: ${reason}`,
-      `Current active slide index: ${currentActiveIndex}`,
-      '',
-      'Current slides:',
-      JSON.stringify(currentSlides),
-      '',
-      'Transcript:',
-      transcriptText(segments),
-      '',
-      'Topics:',
-      JSON.stringify(topics),
-      '',
-      'Fact checks:',
-      JSON.stringify(checks)
-    ].join('\n');
-    const parsed = await tryLlmJson(prompt, { lowCost: true });
-    if (Array.isArray(parsed?.slides)) {
-      slideResult = {
-        slides: parsed.slides.slice(0, 16),
-        activeSlideIndex: clampNumber(parsed.activeSlideIndex, 0, Math.max(0, parsed.slides.length - 1), currentActiveIndex),
-        transitionReason: String(parsed.transitionReason || reason)
-      };
-    }
+  const prompt = [
+    'You are the live slide director for a talk in progress.',
+    'Update the on-screen slide deck based on topic changes, transcript quotes, researched topics, and fact-check context.',
+    'Decide whether the current slide is too full and should be reduced, split, or advanced to the next topic slide.',
+    'Slides can change during the presentation, but should converge into one coherent deck by the end.',
+    'Slides must be engaging presentation slides, not quote lists.',
+    'Each slide needs a strong title, one short quote at most, 3-5 synthesized bullets from that section of the talk, and a high-value fact-check or lookup callout when available.',
+    'Bullets should explain the section: decisions, implications, risks, action items, contrasts, and important claims. Do not repeat transcript quotes as bullets.',
+    'Prioritize high-value fact checks: numerical claims, compliance/legal claims, superlatives, deadlines, pricing, medical/financial/scientific assertions, and provider/product capability claims.',
+    'If a slide has a quote, keep it short and use bullets for analysis.',
+    'If source links or image assets are known, include them in assets. Do not invent URLs.',
+    'Return compact JSON: {"activeSlideIndex":0,"transitionReason":"...","slides":[{"title":"...","kicker":"...","quote":"optional short quote","startSec":0,"bullets":["section insight","risk/action/decision","fact-check callout"],"assets":[{"title":"...","url":"...","type":"link|image"}]}]}.',
+    '',
+    `Trigger reason: ${reason}`,
+    `Current active slide index: ${currentActiveIndex}`,
+    '',
+    'Current slides:',
+    JSON.stringify(currentSlides),
+    '',
+    'Transcript:',
+    transcriptText(segments),
+    '',
+    'Topics:',
+    JSON.stringify(topics),
+    '',
+    'Fact checks:',
+    JSON.stringify(checks)
+  ].join('\n');
+
+  let slideResult = null;
+  const fastLoopReason = shouldUseFastLoopForSlides(reason);
+  if (fastLoopReason) {
+    const parsed = await tryFastLoopJson(prompt, { maxCompletionTokens: 3500 });
+    slideResult = normalizeSlideResult(parsed, currentActiveIndex, reason);
+  } else if (llmApiKey) {
+    const parsed = await tryLlmJson(prompt);
+    slideResult = normalizeSlideResult(parsed, currentActiveIndex, reason);
   }
 
   if (!slideResult) {
@@ -398,6 +403,21 @@ async function buildSlides(body) {
 
   const version = saveSlideVersion(meetingId, reason, slideResult.activeSlideIndex, slideResult.transitionReason, slideResult.slides);
   return { ...slideResult, version, meetingId };
+}
+
+function shouldUseFastLoopForSlides(reason) {
+  return !new Set(['manual', 'final', 'loaded-talk']).has(reason);
+}
+
+function normalizeSlideResult(parsed, currentActiveIndex, reason) {
+  if (!Array.isArray(parsed?.slides)) return null;
+  const slides = parsed.slides.slice(0, 16);
+  if (!slides.length) return null;
+  return {
+    slides,
+    activeSlideIndex: clampNumber(parsed.activeSlideIndex, 0, Math.max(0, slides.length - 1), currentActiveIndex),
+    transitionReason: String(parsed.transitionReason || reason)
+  };
 }
 
 async function transcribeUpload(req, url) {
@@ -506,7 +526,6 @@ async function llmJson(input, opts = {}) {
 
 function selectLlmModel(opts = {}) {
   if (opts.webSearch || opts.imageSearch) return llmModel;
-  if (opts.lowCost && llmProvider === 'xai') return lowCostLlmModel;
   return llmModel;
 }
 
@@ -520,6 +539,51 @@ async function tryLlmJson(input, opts = {}) {
   }
 }
 
+async function fastLoopJson(input, opts = {}) {
+  if (!cerebrasApiKey) throw new Error('CEREBRAS_KEY or CEREBRAS_API_KEY is not configured.');
+  const instructionRole = fastLoopModel === 'gpt-oss-120b' ? 'developer' : 'system';
+  const payload = {
+    model: fastLoopModel,
+    messages: [
+      { role: instructionRole, content: 'Return only valid compact JSON. Do not include markdown, prose, or reasoning.' },
+      { role: 'user', content: input }
+    ],
+    temperature: 0.15,
+    max_completion_tokens: opts.maxCompletionTokens || 3000,
+    response_format: { type: 'json_object' },
+    stream: false
+  };
+  if (fastLoopModel === 'gpt-oss-120b') payload.reasoning_effort = 'low';
+
+  const response = await fetch(cerebrasChatUrl, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${cerebrasApiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Cerebras request failed: ${response.status} ${text.slice(0, 500)}`);
+  }
+
+  const data = await response.json();
+  return parseJsonLoose(collectChatMessageText(data));
+}
+
+async function tryFastLoopJson(input, opts = {}) {
+  if (!cerebrasApiKey) return null;
+  try {
+    return await fastLoopJson(input, opts);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[fast-loop-fallback] ${message}`);
+    return null;
+  }
+}
+
 function collectOutputText(data) {
   const parts = [];
   for (const item of data.output || []) {
@@ -528,6 +592,18 @@ function collectOutputText(data) {
     }
   }
   return parts.join('\n');
+}
+
+function collectChatMessageText(data) {
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content.map((part) => {
+      if (typeof part === 'string') return part;
+      return part?.text || '';
+    }).join('\n');
+  }
+  return '';
 }
 
 function parseJsonLoose(text) {

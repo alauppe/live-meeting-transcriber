@@ -4,7 +4,7 @@
 
 Build a live meeting intelligence web app that listens through the user's microphone, shows the transcript in real time, lets the user query everything said so far, automatically researches new topics as speakers introduce them, performs realtime fact checking, and produces a linked agenda at the end of the talk.
 
-The immediate MVP is browser microphone based using xAI realtime speech-to-text when `X_AI_API_KEY` is configured. It must also accept uploaded recordings of previous talks and run the same transcript, research, fact-checking, Q&A, and agenda pipeline. The architecture must evolve cleanly into a SaaS product, native/mobile app, live phone-call transcription product, and web-meeting ingestion product.
+The immediate MVP is browser microphone based using xAI realtime speech-to-text when `X_AI_API_KEY` is configured. It can optionally use Cerebras `gpt-oss-120b` for high-frequency simple analysis loops, currently live slide regeneration. It must also accept uploaded recordings of previous talks and run the same transcript, research, fact-checking, Q&A, and agenda pipeline. The architecture must evolve cleanly into a SaaS product, native/mobile app, live phone-call transcription product, and web-meeting ingestion product.
 
 ## 2. MVP User Experience
 
@@ -155,7 +155,7 @@ Browser
 
 Node server
   - Static app host
-  - .env loader for X_AI_API_KEY
+  - .env loader for X_AI_API_KEY and CEREBRAS_KEY / CEREBRAS_API_KEY
   - /stt WebSocket proxy to xAI realtime STT
   - /api/transcribe-upload for previous-talk recordings
   - /api/ask
@@ -166,6 +166,7 @@ Node server
   - /api/slide-versions
   - Local SQLite for slide versions in the prototype
   - xAI Responses API calls
+  - Cerebras Chat Completions calls for high-frequency slide synthesis only
 
 xAI
   - Realtime STT over WebSocket
@@ -173,6 +174,10 @@ xAI
   - Q&A and agenda from transcript
   - Web-search-backed topic research
   - Web-search-backed fact checking
+
+Cerebras
+  - gpt-oss-120b for fast, simple, high-frequency live slide regeneration
+  - Must not be used for web lookup, fact checking, Q&A, agenda, or final deck synthesis unless that policy is explicitly changed
 ```
 
 This MVP intentionally keeps API keys server-side and keeps all meeting state in browser memory. Production storage comes next.

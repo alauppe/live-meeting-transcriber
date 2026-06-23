@@ -15,7 +15,7 @@ Browser-first MVP for a live meeting intelligence product.
 - End-of-talk agenda with clickable transcript anchors.
 - On-screen generated slides from topics, transcript quotes, fact-check context, and lookup assets.
 - SQLite-backed slide version history for live deck revisions.
-- xAI-backed analysis endpoints when `X_AI_API_KEY` is set, with local fallbacks for development.
+- xAI-backed analysis endpoints when `X_AI_API_KEY` is set, optional Cerebras fast-loop slide synthesis, and local fallbacks for development.
 
 ## Run
 
@@ -28,18 +28,19 @@ Open `http://127.0.0.1:5177`.
 
 If xAI is not configured and your browser does not support `SpeechRecognition`, use the `Add demo line` button to exercise the full product flow.
 
-## xAI Configuration
+## Provider Configuration
 
 ```bash
 echo 'X_AI_API_KEY=...' > .env
+echo 'CEREBRAS_KEY=...' >> .env
 export X_AI_MODEL=grok-4.3
-export X_AI_LOW_COST_MODEL=grok-build-0.1
+export CEREBRAS_MODEL=gpt-oss-120b
 npm run dev
 ```
 
-The app intentionally keeps xAI access on the server. The browser never receives the API key.
+The app intentionally keeps provider access on the server. The browser never receives API keys.
 
-By default, the app uses `grok-4.3` for live web-search lookups and fact checks, and `grok-build-0.1` for lower-cost non-search synthesis such as Q&A, agenda, and slide generation. Override either model with `X_AI_MODEL` or `X_AI_LOW_COST_MODEL`.
+By default, the app uses `grok-4.3` for xAI STT, live web-search lookups, realtime fact checks, Q&A, agenda generation, and quality/final slide builds. When `CEREBRAS_KEY` or `CEREBRAS_API_KEY` is set, high-frequency live slide synthesis uses Cerebras `gpt-oss-120b` with low reasoning effort. If Cerebras is not configured or fails, those high-frequency slide loops fall back locally instead of spending primary-model calls.
 
 ## Production Direction
 
