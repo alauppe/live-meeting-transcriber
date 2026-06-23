@@ -51,6 +51,7 @@ const els = {
   latestSlideMini: document.querySelector('#latestSlideMini'),
   latestLineMini: document.querySelector('#latestLineMini'),
   pulseButtons: Array.from(document.querySelectorAll('[data-pulse-screen]')),
+  textSizeSelect: document.querySelector('#textSizeSelect'),
   startBtn: document.querySelector('#startBtn'),
   stopBtn: document.querySelector('#stopBtn'),
   demoBtn: document.querySelector('#demoBtn'),
@@ -64,7 +65,7 @@ const els = {
   askForm: document.querySelector('#askForm'),
   questionInput: document.querySelector('#questionInput'),
   answer: document.querySelector('#answer'),
-  topicTabs: document.querySelector('#topicTabs'),
+  lookupFeed: document.querySelector('#lookupFeed'),
   topicDetail: document.querySelector('#topicDetail'),
   factChecks: document.querySelector('#factChecks'),
   agendaBtn: document.querySelector('#agendaBtn'),
@@ -93,6 +94,7 @@ for (const button of els.navButtons) {
 for (const button of els.pulseButtons) {
   button.addEventListener('click', () => setScreen(button.dataset.pulseScreen));
 }
+els.textSizeSelect.addEventListener('change', () => setTextSize(els.textSizeSelect.value));
 els.askForm.addEventListener('submit', askQuestion);
 els.agendaBtn.addEventListener('click', generateAgenda);
 els.uploadForm.addEventListener('submit', uploadRecording);
@@ -105,6 +107,7 @@ init();
 async function init() {
   state.savedTalks = loadSavedTalks();
   state.selectedPreviousTalkId = state.savedTalks[0]?.id || null;
+  setTextSize(localStorage.getItem('liveMeetingTranscriber.textSize') || 'medium');
   renderAppShell();
   try {
     state.config = await fetch('/api/config').then((response) => response.json());
@@ -528,13 +531,35 @@ async function refreshTopics() {
 
 function renderTopics() {
   if (!state.topics.length) {
+    els.lookupFeed.classList.add('empty');
+    els.lookupFeed.textContent = 'New topics appear here newest-first as the speaker introduces them.';
     els.topicDetail.classList.add('empty');
-    els.topicDetail.textContent = 'New topics will appear here as vertical tabs.';
+    els.topicDetail.textContent = 'Select a lookup for detail.';
     renderAppShell();
     return;
   }
 
-  const selected = state.topics.find((topic) => topic.slug === state.selectedTopicSlug) || state.topics[0];
+  els.lookupFeed.classList.remove('empty');
+  els.lookupFeed.innerHTML = [...state.topics].reverse().slice(0, 8).map((topic) => `
+    <article class="lookup-card ${topic.slug === state.selectedTopicSlug ? 'active' : ''}" data-topic-card="${escapeAttr(topic.slug)}">
+      <h3>${escapeHtml(topic.title)}</h3>
+      <p>${escapeHtml(topic.summary || topic.whyRelevant || 'Mentioned by the speaker.')}</p>
+      <p><strong>Why:</strong> ${escapeHtml(topic.whyRelevant || 'Mentioned in the recent transcript.')}</p>
+      <div class="links">
+        ${(topic.links || []).slice(0, 2).map((link) => `
+          <a href="${escapeAttr(link.url)}" target="_blank" rel="noreferrer">${escapeHtml(link.title || link.url)}</a>
+        `).join('')}
+      </div>
+    </article>
+  `).join('');
+  for (const card of els.lookupFeed.querySelectorAll('[data-topic-card]')) {
+    card.addEventListener('click', () => {
+      state.selectedTopicSlug = card.dataset.topicCard;
+      renderTopics();
+    });
+  }
+
+  const selected = state.topics.find((topic) => topic.slug === state.selectedTopicSlug) || state.topics[state.topics.length - 1];
   els.topicDetail.classList.remove('empty');
   els.topicDetail.innerHTML = `
     <h3>${escapeHtml(selected.title)}</h3>
@@ -671,13 +696,20 @@ function scheduleSlideLoop(reason) {
 function addSlidePendingUpdate(reason) {
   const latestSegment = state.segments[state.segments.length - 1];
   const latestTopic = state.topics[state.topics.length - 1];
-  const text = reason === 'topic-change' && latestTopic
-    ? `New topic ready: ${latestTopic.title}`
-    : latestSegment
-      ? `New quote: ${latestSegment.text}`
-      : `Update queued: ${reason}`;
-  state.slidePendingUpdates.unshift({ reason, text, createdAt: Date.now() });
-  state.slidePendingUpdates = state.slidePendingUpdates.slice(0, 5);
+  const updates = [];
+  if (reason === 'topic-change' && latestTopic) {
+    updates.push(`New topic: ${latestTopic.title}`);
+    if (latestTopic.whyRelevant) updates.push(latestTopic.whyRelevant);
+    if (latestTopic.summary) updates.push(latestTopic.summary);
+  } else if (latestSegment) {
+    updates.push(compactSlideBullet(latestSegment.text));
+  } else {
+    updates.push(`Update queued: ${reason}`);
+  }
+  for (const text of updates.filter(Boolean).slice(0, 3).reverse()) {
+    state.slidePendingUpdates.unshift({ reason, text, createdAt: Date.now() });
+  }
+  state.slidePendingUpdates = dedupePendingUpdates(state.slidePendingUpdates).slice(0, 8);
   renderSlide();
 }
 
@@ -748,7 +780,7 @@ function renderSlide() {
 
   const slide = state.slides[state.selectedSlideIndex] || state.slides[0];
   const assets = (slide.assets || []).slice(0, 4);
-  const pending = state.slidePendingUpdates.slice(0, 3);
+  const pending = state.slidePendingUpdates.slice(0, 5);
   els.slideStage.classList.remove('empty');
   els.slideStage.innerHTML = `
     <div class="slide-card">
@@ -761,6 +793,7 @@ function renderSlide() {
         <span class="slide-count">${state.selectedSlideIndex + 1} / ${state.slides.length} · v${state.slideVersion || 1}</span>
         ${state.slideTransitionReason ? `<p>${escapeHtml(state.slideTransitionReason)}</p>` : ''}
         ${pending.length ? `
+          <p class="slide-kicker">New points as speaker progresses</p>
           <ul class="slide-bullets pending-updates">
             ${pending.map((item) => `<li>${escapeHtml(item.text)}</li>`).join('')}
           </ul>
@@ -845,6 +878,32 @@ function renderPulsePane() {
     els.latestLineMini.classList.add('empty');
     els.latestLineMini.textContent = 'No transcript yet.';
   }
+}
+
+function setTextSize(size) {
+  const normalized = ['small', 'medium', 'large', 'xlarge'].includes(size) ? size : 'medium';
+  document.body.classList.remove('text-small', 'text-medium', 'text-large', 'text-xlarge');
+  document.body.classList.add(`text-${normalized}`);
+  els.textSizeSelect.value = normalized;
+  localStorage.setItem('liveMeetingTranscriber.textSize', normalized);
+}
+
+function compactSlideBullet(text) {
+  const cleaned = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!cleaned) return '';
+  if (cleaned.length <= 120) return cleaned;
+  const sentence = cleaned.split(/(?<=[.!?])\s+/).find((part) => part.length >= 24) || cleaned;
+  return sentence.length > 120 ? `${sentence.slice(0, 117)}...` : sentence;
+}
+
+function dedupePendingUpdates(items) {
+  const seen = new Set();
+  return items.filter((item) => {
+    const key = item.text.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function renderSectionMenu() {

@@ -11,6 +11,7 @@
   --gold: #d4a017;
   --nav: #18231d;
   --shadow: 0 22px 60px rgba(38, 31, 18, 0.16);
+  --content-scale: 1;
 }
 
 * {
@@ -26,6 +27,22 @@ body {
     radial-gradient(circle at 10% 0%, rgba(212, 160, 23, 0.24), transparent 26rem),
     radial-gradient(circle at 92% 10%, rgba(29, 89, 102, 0.22), transparent 26rem),
     linear-gradient(135deg, #efe3c4 0%, #f8f1df 42%, #dfd1ad 100%);
+}
+
+body.text-small {
+  --content-scale: 0.9;
+}
+
+body.text-medium {
+  --content-scale: 1;
+}
+
+body.text-large {
+  --content-scale: 1.15;
+}
+
+body.text-xlarge {
+  --content-scale: 1.32;
 }
 
 button,
@@ -265,6 +282,21 @@ button:disabled {
   text-transform: uppercase;
 }
 
+.text-size-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.text-size-control select {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.24rem 0.5rem;
+  color: var(--ink);
+  background: var(--field);
+  font-size: 0.76rem;
+}
+
 .latest-transcript {
   display: grid;
   gap: 6px;
@@ -279,6 +311,7 @@ button:disabled {
   border-radius: 12px;
   background: rgba(73, 98, 50, 0.08);
   line-height: 1.25;
+  font-size: calc(0.92rem * var(--content-scale));
 }
 
 .interim {
@@ -401,12 +434,39 @@ body.no-inner-menu .screen.active {
 .detail-card,
 .transcript,
 .fact-list,
-.agenda {
+.agenda,
+.lookup-feed {
   padding: 18px 20px 22px;
 }
 
 .detail-card {
   line-height: 1.5;
+  font-size: calc(1rem * var(--content-scale));
+}
+
+.lookup-feed {
+  display: grid;
+  gap: 12px;
+}
+
+.lookup-card {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 14px;
+  background: rgba(255, 249, 232, 0.66);
+  font-size: calc(1rem * var(--content-scale));
+}
+
+.lookup-card.active {
+  border-color: rgba(29, 89, 102, 0.55);
+  box-shadow: inset 0 0 0 2px rgba(29, 89, 102, 0.12);
+}
+
+.lookup-card h3 {
+  margin: 0 0 6px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: calc(1.32rem * var(--content-scale));
+  letter-spacing: -0.04em;
 }
 
 .detail-card h3 {
@@ -438,7 +498,7 @@ body.no-inner-menu .screen.active {
 }
 
 .segment-text {
-  font-size: 1.02rem;
+  font-size: calc(1.02rem * var(--content-scale));
   line-height: 1.48;
 }
 
@@ -504,6 +564,7 @@ body.no-inner-menu .screen.active {
   border-radius: 20px;
   padding: 14px;
   background: rgba(255, 249, 232, 0.66);
+  font-size: calc(1rem * var(--content-scale));
 }
 
 .fact-meta {
@@ -644,6 +705,7 @@ input[type="file"] {
   padding: 14px;
   background: rgba(255, 249, 232, 0.08);
   line-height: 1.35;
+  font-size: calc(1rem * var(--content-scale));
 }
 
 .pending-updates li {

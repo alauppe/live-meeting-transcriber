@@ -38,6 +38,15 @@
           <section class="latest-card">
             <div class="latest-head">
               <span>Latest transcript</span>
+              <label class="text-size-control">
+                Text
+                <select id="textSizeSelect" aria-label="Text size">
+                  <option value="small">Small</option>
+                  <option value="medium" selected>Medium</option>
+                  <option value="large">Large</option>
+                  <option value="xlarge">XL</option>
+                </select>
+              </label>
               <span id="meetingLabel">Unsaved talk</span>
             </div>
             <div id="latestTranscript" class="latest-transcript empty">The last 3-4 transcript lines stay here during the talk.</div>
@@ -60,7 +69,8 @@
                 <h2>Newest topics first</h2>
               </div>
             </div>
-            <article id="topicDetail" class="detail-card empty">New topics appear in the inner menu as the speaker introduces them.</article>
+            <div id="lookupFeed" class="lookup-feed empty">New topics appear here newest-first as the speaker introduces them.</div>
+            <article id="topicDetail" class="detail-card empty">Select a lookup for detail.</article>
           </section>
 
           <section class="screen" data-screen-panel="transcript">
